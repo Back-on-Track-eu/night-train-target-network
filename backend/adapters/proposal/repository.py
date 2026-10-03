@@ -1248,12 +1248,27 @@ class ProposalRepository:
     # shared column but a DIFFERENT namespace per source (curated
     # calibration ids vs ontd catalog ids) — a composition_ids filter
     # matches across both, documented in api/README.md §7.1.
+    #
+    # Distance and time are ONE WAY here, like the existing side. The
+    # stored summary (models/evaluation/summary.py _route_metrics) sums
+    # both trips of the pair — that is a cycle, which is what the supply
+    # figures (train-km per year, one operating day) are built on, and the
+    # builder's KPIs halve it themselves (lib/compareKpis.ts). The gallery
+    # lists proposals beside real trains, whose ONTD figures are per
+    # direction, sorts the two by distance and sieves them by the position
+    # paper's one-way envelope — so it is halved once, here, where the two
+    # sources meet, and never in the stored row. The two trips of a pair
+    # are the same stops in reverse, so half the cycle IS one direction up
+    # to the rounding of the stored figure. avg_speed_kmh is a ratio and
+    # stays.
     _GALLERY_PROPOSAL_BRANCH = (
         "SELECT 'proposal'::text AS source, NULL::text AS route_id, "
         "       proposal_id, proposal_version, user_id, name, "
         "       route_fingerprint, composition_id, scenario_id, "
-        "       route_builder_version, calc_version, total_distance_km, "
-        "       total_time_h, avg_speed_kmh, n_stops, countries, "
+        "       route_builder_version, calc_version, "
+        "       round(total_distance_km / 2, 1) AS total_distance_km, "
+        "       round(total_time_h / 2, 2) AS total_time_h, "
+        "       avg_speed_kmh, n_stops, countries, "
         "       country_relations, stop_ids, "
         "       cost_eur_per_train_km, revenue_eur_per_train_km, "
         "       margin_eur_per_train_km, net_eur_per_year, subsidy_eur_per_year, "
