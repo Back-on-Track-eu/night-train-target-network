@@ -22,6 +22,7 @@ from tests.helpers import (
     PROPOSALS_URL,
     comment_url,
     compute,
+    half_like_postgres,
     like_url,
     publish,
     purge_saved_proposals,
@@ -205,6 +206,37 @@ class TestFilterKinds:
 
         miss = _gallery(api_base, filter={"total_distance_km": {"max": km - 1}})
         assert published["proposal_id"] not in _proposal_ids(miss)
+
+    def test_gallery_distance_and_time_are_one_way(
+        self, api_base, db_cur, published, existing_routes
+    ):
+        """The stored summary sums both trips of the pair (a cycle, what the
+        supply figures are built on); the gallery lists ONE direction, like
+        the ONTD side does — half the stored figure, avg speed untouched.
+        An existing row's figures pass through unchanged."""
+        db_cur.execute(
+            "SELECT total_distance_km, total_time_h, avg_speed_kmh "
+            "FROM proposals.proposal_summaries WHERE proposal_id = %s",
+            (published["proposal_id"],),
+        )
+        stored = db_cur.fetchone()
+        row = _gallery(api_base, filter={"proposal_ids": [published["proposal_id"]]})[
+            "summaries"
+        ]["proposals"][0]
+        assert row["total_distance_km"] == half_like_postgres(
+            stored["total_distance_km"], 1
+        )
+        assert row["total_time_h"] == half_like_postgres(stored["total_time_h"], 2)
+        assert row["avg_speed_kmh"] == float(stored["avg_speed_kmh"])
+
+        existing = {
+            r["route_id"]: r
+            for r in _gallery(api_base, filter={"sources": ["existing"]}, limit=500)[
+                "summaries"
+            ]["proposals"]
+        }
+        assert existing[_EXISTING_ROUTE_IDS[0]]["total_distance_km"] == 700.0
+        assert existing[_EXISTING_ROUTE_IDS[0]]["total_time_h"] == 9.5
 
     def test_list_filter_composition_ids(self, api_base, published):
         hit = _gallery(api_base, filter={"composition_ids": [_COMPOSITION]})

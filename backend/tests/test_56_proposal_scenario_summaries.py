@@ -35,6 +35,7 @@ from tests.helpers import (
     PROPOSALS_URL,
     _variant_id_for,
     compute,
+    half_like_postgres,
     publish,
     purge_saved_proposals,
 )
@@ -333,7 +334,8 @@ def test_gallery_on_a_variant_reads_that_variant(
     assert row["likes_count"] == 0
     assert row["created_at"] is not None
     stored = _scenario_rows(db_cur, published["proposal_id"])[hsr_variant]
-    assert row["total_time_h"] == float(stored["total_time_h"])
+    # The gallery lists one direction; the stored row is the cycle (§7.1).
+    assert row["total_time_h"] == half_like_postgres(stored["total_time_h"], 2)
     assert row["cost_eur_per_train_km"] == float(stored["cost_eur_per_train_km"])
 
     # The map follows: the card's own route and at least one corridor,
