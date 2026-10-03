@@ -54,7 +54,7 @@ const kpiOptions = computed(() =>
   <section class="flex flex-col gap-3 rounded-xl border border-primary-50/10 p-4">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex flex-col">
-        <h2 class="flex items-center gap-1.5 text-base font-semibold text-primary-50">
+        <h2 class="flex flex-wrap items-center gap-1.5 text-base font-semibold text-primary-50">
           {{ t('proposal.compare.title') }}
           <InfoHint
             :text="t('proposal.compare.titleHint')"

@@ -49,6 +49,7 @@ import { ticketVat as computeTicketVat } from '@/lib/ticketVat'
 import { formatClock, dayOffset } from '@/lib/tripClock'
 import { useProposalFamily } from '@/composables/useProposalFamily'
 import { useDeferredFlag } from '@/composables/useDeferredFlag'
+import { LG_MEDIA_QUERY, useMediaQuery } from '@/composables/useMediaQuery'
 import { buildScenarioAxes, conditionLabelKey } from '@/lib/scenarioAxes'
 import { alternativeRoutes, inflateRoute, memberFailure, routeFor } from '@/lib/proposalFamily'
 import {
@@ -900,6 +901,18 @@ function toggleExpertMode() {
     nightSelection.value = { interval: committedNightInterval.value, pending: null }
   }
 }
+
+// Expert mode is a two-column tool: its stepper column widens the itinerary
+// past a phone, the departure strip and the night picker need the map
+// beside the table, and the whole thing is precision work for a pointer.
+// Below Tailwind's lg the button is not offered, and a session that was in
+// expert mode when the window narrowed (rotation, a resized desktop) leaves
+// it the same way the button does — overrides dropped, not hidden, so no
+// invisible override reaches the next calc.
+const expertAvailable = useMediaQuery(LG_MEDIA_QUERY)
+watch(expertAvailable, (available) => {
+  if (!available && expertMode.value) toggleExpertMode()
+})
 
 // The offered scenarios' variants, in the picker's order — the family's
 // scenario axis. A network still held back as "coming soon"
@@ -3468,13 +3481,15 @@ onMounted(async () => {
             </p>
           </div>
 
+          <!-- The tools wrap on a narrow screen instead of running past its
+               edge; the spacers keep them centred where there is room. -->
           <div
             v-if="currentMode !== 'loading'"
-            class="mt-5 flex items-center gap-2 border-t border-primary-50/10 pt-5"
+            class="mt-5 flex flex-wrap items-center justify-center gap-2 border-t border-primary-50/10 pt-5"
           >
             <div class="flex flex-1 items-center gap-2" />
 
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center justify-center gap-2">
               <!-- Back to edit (suggest) — abandon the suggestion step, itinerary
                    untouched. -->
               <button
@@ -3528,7 +3543,7 @@ onMounted(async () => {
                    there is nothing to pin or pad before the first
                    evaluation. -->
               <button
-                v-if="currentMode === 'display'"
+                v-if="currentMode === 'display' && expertAvailable"
                 :class="[toolPillClass, expertMode ? 'expert-pill-on' : '']"
                 :aria-pressed="expertMode"
                 @mouseenter="
