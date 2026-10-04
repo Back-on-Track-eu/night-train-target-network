@@ -343,10 +343,13 @@ result set). Leaving the gallery while a request is in flight cancels it
 and remembers it, so coming back resumes the load instead of showing an
 empty column.
 
-**The distribution panel** (`GalleryDistribution.vue`, pure logic in
-`lib/galleryRanges.ts`). Above the map: one histogram at a time — distance,
-duration, average speed or stops, picked from the dropdown — of the
-backend's `distributions` section, proposals in blue with existing trains
+**The range filters panel** (`GalleryDistribution.vue`, pure logic in
+`lib/galleryRanges.ts`). A collapsible above the scenario panel, in the same
+idiom: one line until opened — the preset's name ("Typical night trains")
+or "Custom ranges", then the ranges in effect as chips — so the map keeps
+its height while nobody is editing. Open, it shows one histogram at a time
+— distance, duration, average speed or stops, picked from the dropdown —
+of the backend's `distributions` section, proposals in blue with existing trains
 stacked on top in orange, bars outside the range dimmed. The range is set
 three ways: dragging the two handles (snapping to bin edges; arrow keys
 work too), typing a bound (empty = none), or the "Typical night trains"
@@ -362,7 +365,9 @@ this one range keeps or drops of the set the other filters leave. Every
 range goes out with `scope: 'proposal'`: **existing trains always stay
 listed**, they are the comparison, whether or not they meet the envelope.
 A drag commits once, on release — one reload per gesture, not per pixel.
-In the URL: nothing for the preset; otherwise each bounded measure as
+The chart's viewBox is 1 400 units wide from `lg` up, 900 from `sm`, 460
+below: the same drawing, proportioned so it stays readable on a phone and
+does not tower over the map on a desktop. In the URL: nothing for the preset; otherwise each bounded measure as
 `km=500-2000`, `h=7-21`, `kmh=50-`, `stops=-8` (an empty side is open),
 and `typical=0` for no ranges at all (also read from older links).
 

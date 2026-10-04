@@ -1,9 +1,11 @@
 # Gallery — distribution panel (2026-10-04)
 
 Backend 0.5.14 (one new `include` section, no migration, no data task) +
-frontend. Implements the sketch agreed on 2026-10-04: one histogram at a
-time above the map, the range set by dragging, typing or the
-typical-night-train preset, all four ranges persisting as chips.
+frontend. Implements the sketch agreed on 2026-10-04, placed as decided
+after the first look: a **collapsible above the scenario panel** (the map
+keeps its height), one summary line when closed — preset or "custom", the
+ranges in effect as chips — and, open, one histogram at a time with the
+range set by dragging, typing or the typical-night-train preset.
 
 ## Backend
 
@@ -28,14 +30,17 @@ typical-night-train preset, all four ranges persisting as chips.
 
 ## Frontend
 
-- `frontend/src/components/GalleryDistribution.vue` — **new**: measure
-  dropdown (PrimeVue `Select`, `selectPillPt`), min/max inputs, preset pill
-  with `InfoHint`, SVG histogram (proposals blue, existing orange on top,
-  2 px gap, dimmed outside the range), two draggable handles (snap to bin
-  edges, arrow keys, `role="slider"`), hover tooltip per bin, chips with ×,
-  legend, "N existing trains without figures". Drag commits on release
-  only. ViewBox 900 wide from `sm` up, 460 below, so the chart is readable
-  on a phone.
+- `frontend/src/components/GalleryDistribution.vue` — **new**: collapsible
+  in the scenario panel's idiom (header button with `aria-expanded`, moon
+  icon, "Range filters", preset name or "Custom ranges", chips when
+  closed, chevron). Body: measure dropdown (PrimeVue `Select`,
+  `selectPillPt`), min/max inputs, preset pill with `InfoHint`, SVG
+  histogram (proposals blue, existing orange on top, 2 px gap, dimmed
+  outside the range), two draggable handles (snap to bin edges, arrow keys,
+  `role="slider"`), hover tooltip per bin, chips with ×, legend, "N
+  existing trains without figures". Drag commits on release only. ViewBox
+  1 400 wide from `lg`, 900 from `sm`, 460 below — readable on a phone,
+  not towering on a desktop.
 - `frontend/src/lib/galleryRanges.ts` — **new**: `GalleryRanges`,
   `typicalNightTrainRanges()`, `normalizeRanges`, `sameRanges`,
   `isTypicalNightTrain`, `rangesToFilter` (adds `scope: 'proposal'`),
@@ -48,15 +53,17 @@ typical-night-train preset, all four ranges persisting as chips.
 - `frontend/src/components/Gallery.vue` — `ranges` replaces `typicalOnly`;
   `loadDistributions()` beside `loadCorridors()` (own abort slot, resumed
   after a teardown like the corridors); URL sync via `rangesToQuery` /
-  `rangesFromQuery`; the toggle leaves the control row; the right column
-  is now panel + map. `await nextTick()` before lifting the hydration
-  guard — a link that set any field loaded the gallery twice.
+  `rangesFromQuery`; the toggle leaves the control row; the panel sits
+  above `GalleryScenarioPanel`, the map column is untouched. `await
+  nextTick()` before lifting the hydration guard — a link that set any
+  field loaded the gallery twice.
 - `frontend/src/lib/proposalsApi.ts` — `fetchDistributions()`.
 - `frontend/src/types/api.ts` — `n_stops` range on `ProposalsFilter`,
   `'distributions'` section, `DistributionBin` / `DistributionMeasure` /
   `DistributionsSection`.
 - `frontend/src/composables/useMediaQuery.ts` — `SM_MEDIA_QUERY`.
-- `frontend/src/i18n/locales/en.json`, `de.json` — `gallery.distribution.*`.
+- `frontend/src/i18n/locales/en.json`, `de.json` — `gallery.distribution.*`
+  (incl. `title` "Range filters", `custom` "Custom ranges").
 - `frontend/README.md` — "Three requests per query", "The distribution
   panel" (replaces the toggle paragraph).
 
@@ -72,9 +79,11 @@ typical-night-train preset, all four ranges persisting as chips.
   fold into first bin / open bin / unknown. The DB tests need your stack.
 - vitest: 394 passed. prettier: clean. eslint on the touched files: clean.
   vue-tsc: the error count is unchanged (pre-existing in my copy).
-- Rendered against a mocked API with Playwright at 1280 and 400 px: panel
-  draws, drag moves the lower handle to 1 100 km, the pill goes quiet, the
-  URL reads `km=1100-2000&h=7-21&kmh=50-`, three requests per query.
+- Rendered against a mocked API with Playwright at 1280 and 400 px, closed
+  and open: the summary line wraps its chips on a phone, the open panel's
+  controls wrap, the chart stays readable; a drag moves the lower handle to
+  1 100 km, the pill goes quiet, the URL reads `km=1100-2000&h=7-21&kmh=50-`,
+  three requests per query, no double initial load.
 
 ## After extracting
 

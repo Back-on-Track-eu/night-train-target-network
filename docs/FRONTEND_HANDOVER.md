@@ -1234,8 +1234,10 @@ The gallery's four range filters (`lib/galleryRanges.ts`) replace the
 the ranges, `n_stops` joins the three `ProposalsFilter` range keys, and
 every range carries `scope: 'proposal'`. URL keys `km`, `h`, `kmh`,
 `stops` (`min-max`, empty side open) replace `typical=0`, which is still
-read. `GalleryDistribution.vue` is the panel (`v-model:ranges`,
-`distributions`, `status`, emits `retry`); `GalleryMap.vue` is unchanged.
+read. `GalleryDistribution.vue` is the panel — a collapsible above the
+scenario panel, one summary line until opened (`v-model:ranges`,
+`distributions`, `status`, emits `retry`); `GalleryMap.vue` and the map
+column are unchanged.
 
 ## Maintaining this document
 
