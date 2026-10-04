@@ -2,8 +2,9 @@
 family_serialize.py
 ===================
 Domain → dict for the proposal family (adapters/family/README.md): the
-§2.5 document POST /api/proposal/family returns and GET …/<key> serves
-back, and the per-member error record. No DB access, no Flask.
+family document POST /api/proposal/family returns and GET …/<key> serves
+back (api/README.md, "Proposal Family"), and the per-member error record.
+No DB access, no Flask.
 
 What the document carries, and only once:
 

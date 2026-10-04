@@ -103,7 +103,8 @@ frontend/
     ├── i18n/
     │   ├── index.ts         # vue-i18n setup
     │   └── locales/
-    │       └── en.json      # English strings
+    │       ├── en.json      # English strings
+    │       └── de.json      # German strings — same key tree, both change together
     ├── stores/
     │   └── store.ts         # Pinia store
     ├── lib/
@@ -117,15 +118,24 @@ frontend/
     │   ├── ctaButtonClass.ts   # Shared "Suggest a new route" pill styling
     │   ├── feedbackApi.ts      # Thin client for POST /api/feedback
     │   ├── selectPillPt.ts     # Shared PrimeVue Select pass-through styling
+    │   ├── galleryMap.ts       # Gallery map: corridor styling, stop/pin/country features, bounds
+    │   ├── gallerySearch.ts    # Gallery search bar: tabs × kinds → request filter, city grouping
+    │   ├── countryShapes.ts    # Lazy loader for assets/country_shapes.json
+    │   ├── detailsScope.ts     # Zone D: the change-scope rule (owns / waits), schedule + tariff arithmetic
+    │   ├── demandAllocation.ts # Zone D: the demand allocation, a port of models/demand (parity-tested)
+    │   ├── galleryRanges.ts    # Gallery range filters ↔ URL keys; the typical-night-train preset
+    │   ├── galleryEntry.ts     # Where /gallery opens: the pitch, or the gallery proper
+    │   ├── docsLinks.ts        # Builder ⓘ → documentation anchors (a contract with docs-site/)
+    │   ├── mapFonts.ts         # Glyph stacks shared by the builder and gallery maps
     │   └── uiLanguages.ts      # Language bar: order + which locales are live
     ├── composables/
     │   ├── useProposalFamily.ts  # One family request per evaluation; member lookups after
+    │   ├── useFreshBuild.ts      # Reloads onto the current build after a deploy
     │   └── useMediaQuery.ts      # A reactive media query; LG_MEDIA_QUERY = Tailwind's lg
     ├── utils/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
         ├── AppIcon.vue                    # Tree-shakeable @mdi/js icon wrapper
-        ├── CompositionDetailOverlay.vue   # Composition detail popover — facts + formation
         ├── CompositionFormation.vue       # Formation drawing (Wagenstandsanzeiger)
         ├── CompareSection.vue             # Zone B: KPI picker, scenario bars, scenario × composition grid
         ├── CostRevenueBreakdown.vue       # Zone E: cost/revenue bars + the cube explorer (collapsible)
@@ -135,7 +145,8 @@ frontend/
         ├── MainKpiGrid.vue                # Zone A: the eight headline KPIs with deltas vs. baseline
         ├── ProposalResults.vue            # Everything below the map, zones A–E
         ├── ScenarioSwitches.vue           # Zone A: the scenario as three switches (+ measures, disabled)
-        ├── SettingsSection.vue            # Zone D: supply table / demand notes (collapsible)
+        ├── DetailsSection.vue             # Zone D: the Details card — five tabs (see below)
+        ├── details/                       # Zone D panels: SchedulePanel, PlacesPricesPanel, DemandTab, …
         ├── SupplyTable.vue                # Compositions compared on the current route + scenario
         ├── LandingIntro.vue               # Landing pitch above the gallery (copy lives in en.json)
         ├── MapView.vue                    # MapLibre route/stop map
@@ -179,7 +190,7 @@ others as `cellErrors.<code>`.
 
 **Coming-soon surfaces.** Three things are shown but disabled, each for a
 different reason: the "price & regulatory measures" toggles (the backend
-does not model them — `docs/PARKED_WORK.md` §3), the "fit to demand" column
+does not model them — `docs/PARKED_WORK.md` §4), the "fit to demand" column
 (the demand stopgap gives every composition the same utilisation), and the
 **Infra 2032** network (the routing instance runs and the backend evaluates
 it fine, but its infrastructure data is not at publishable quality yet).
@@ -195,6 +206,71 @@ the catalogue can be browsed without firing a calc per arrow click. Reverting
 to the selection the results were computed with clears the flag on its own. A
 diverged itinerary takes precedence — that is the Evaluate button's path,
 which also re-prompts for stop suggestions.
+
+## The Details card (zone D)
+
+`DetailsSection.vue` with the panels under `components/details/` — five
+tabs: Supply, Demand, Train operation, Infrastructure, Overhead. Three
+inputs change the calculation and each is a **scope**: the schedule and the
+prices (Supply tab), the demand (Demand tab). A panel either **owns** a
+scope — it recomputes on the page and says so (the Schedule panel previews
+its own frequency) — or **waits** on one: it keeps the figures it has,
+greys out, and shows the dot beside the tab label until the backend has
+answered. Nothing ever shows a number that mixes a previewed input with a
+calculated one. Which tab waits on what is `TAB_AWAITS` in
+`lib/detailsScope.ts`:
+
+| tab             | owns             | waits on                           |
+| --------------- | ---------------- | ---------------------------------- |
+| Supply          | schedule, prices | demand (the What-follows panel)    |
+| Demand          | demand           | — (previews everything it changes) |
+| Train operation | —                | schedule, prices, demand           |
+| Infrastructure  | —                | schedule                           |
+| Overhead        | —                | schedule, prices, demand           |
+
+Three data sources feed the card, and a panel says which one it reads:
+the family document's summary row (every member, always there), the
+member's views and `operations` (one member, fetched on demand), and the
+stored proposal (the creator's committed inputs). One `InfoHint` per
+panel, never per figure.
+
+**Parity rule.** The demand arithmetic exists twice — `models/demand/` in
+Python and `lib/demandAllocation.ts` + `lib/odMatrix.ts` here, so the Demand
+tab can preview without a round trip. `backend/tests/test_83_demand_units.py`
+writes `tests/fixtures/demand_reference.json`; the TypeScript suites read
+it. Change both sides together, run both suites, commit the fixture with
+the change.
+
+## Info overlays
+
+Every ⓘ in the builder opens the same `InfoPopover` (hover intent, or a
+click) with one shape: a short text, _Read more in the
+documentation_ (`DocsReadMore` → an anchor on the docs site) and _Provide
+feedback_ (`FeedbackLink` → `/docs/feedback?topic=…`). The text is **at
+most four lines at the overlay's `w-72` (288 px) column, in English and in German**;
+anything longer belongs on the linked documentation page, not in the
+overlay. The docs anchors are a contract: `lib/docsLinks.ts` on this side
+(`DOCS_DETAIL_PANEL`, `DOCS_VIEW`, …), the `{#id}` headings of
+`docs-site/*.md` on the other — rename one only together with the other.
+A new result panel needs three things: its overlay text (both locales), its
+docs anchor, and its feedback topic alias (`lib/feedbackLink.ts`, mirrored
+by the backend's result-panel sub-categories in
+`api/helpers/feedback_serialize.py`).
+
+## Translations
+
+`en.json` and `de.json` carry the same key tree and change in the same
+commit. Enabling a further language: add `i18n/locales/<code>.json`, register it
+in `i18n/index.ts`, add the code to `SUPPORTED` in `lib/localeStorage.ts`
+and flip its entry in `lib/uiLanguages.ts` to `available: true` (a listed
+language with `available: false` renders greyed out in the language bar).
+
+German wording, as reviewed on 2026-09-21: _Zugbildung_ for a composition
+(_Wagenreihung_ only when the order of the coaches is meant),
+_Schnellfahrstrecke_, _Relation_ for an OD pair, _Neuverkehr_ for induced
+travel, _Basisszenario_, _fixieren_ (never _pinnen_), _zu unmittelbaren
+Kosten_ for direct-cost track access; the reader is addressed as _Du_ /
+_Dein_, capitalised; dashes are spaced en dashes.
 
 ## Stop suggestions
 
@@ -302,8 +378,40 @@ calc failure carries a _Try again_ action on its toast.
 
 ## Gallery
 
+**Where the page opens.** `/gallery` is also the site's landing page, so
+the pitch (`LandingIntro.vue`) comes first for someone entering at the
+origin root or reloading a plain `/gallery`. Everyone else came for the
+gallery: a link that names a filter (any query key beyond the always
+written `tab`, `kind`, `sort`, `dir`), the `#gallery` hash the docs site's
+buttons and the proposal page's back pill carry — those open scrolled to
+the search bar and the map (`lib/galleryEntry.ts`, `scrollToGallery`).
+
 `Gallery.vue` is one screen with three parts: the search bar, the result
 column and the map beside it.
+
+**The search bar** is three places × two kinds (`lib/gallerySearch.ts`,
+decided 2026-10-04, replacing the four tabs A→B / By Station / By Country /
+Between Countries, which were the same two kinds unevenly spread). The tabs
+pick the kind of place — station, city, country — and a switch inside the
+pill picks _via_ (one field: routes that call there) or _from → to_ (two
+fields: routes that call at both, in either direction — the backend has no
+ordering predicate and a hint line under the pill says so). Each tab keeps
+its own picks, so switching tabs and back loses nothing. The mapping to the
+request is one table in `gallerySearch.ts`: station → `stop_ids` (a pair as
+`mode: 'all'`), city → `cities` (the backend's 0.5.15 filter, OSM place ids,
+a pair as `mode: 'all'`), country → `countries` or, for a pair, the stored
+`country_relations` token. Cities are grouped client-side from the stops
+store (`cityOptions`: `StopCity.osm_id`, display name in the UI locale,
+search text in every catalogue language, centroid of the city's stops for
+the map pin); a stop without a resolved city stays reachable as a station.
+The two pickers are `StopSelect.vue` and the generic `OptionSelect.vue`
+(options with a label, an optional subtitle and their own search text —
+countries and cities alike). In the URL: `?tab=city&kind=fromTo&a=…&b=…`,
+with `a`/`b` the active tab's ids; the pre-2026-10-04 shape
+(`?mode&from&to&station&country&relFrom&relTo`) is still read
+(`proposalPrefill.ts`, `legacyQuery`). "Suggest a new route" prefills from
+the same seed: the picked stations, a city's capital-listed stop (else its
+first), a country's capital.
 
 **One screenful (from `lg` up).** The results row — card column AND map — is
 exactly the viewport minus the gallery's own chrome, measured at runtime
@@ -315,8 +423,12 @@ and the two columns are the same height, so the card list ends at the map's
 bottom edge instead of running past its corner. The cards scroll inside their
 own column, not down the page, which is also why the infinite-scroll sentinel is
 observed against that box (`root: cardScroller`) rather than the viewport.
-Anything added above the results row comes straight off the row's height — that
-is why the result count and the ownership switch live in the result column.
+Anything added above the results row comes straight off the row's height — the
+result count and the sort stay in the result column for that reason. The
+source and ownership switches moved out of it on 2026-10-04 into a "Show" strip
+under the search pill, with the other controls that narrow the list: one row
+above the panels (≈44 px) against two rows gone from the card column — the
+cards gain what the map loses.
 `ROW_MIN_HEIGHT_PX` is the floor for short windows: it keeps room for roughly
 three cards, and below it the page scrolls again.
 
@@ -346,8 +458,42 @@ suggestion in front of the train already running there, each in its own colour
 and at its own count's thickness (`proposal_count` / `existing_count`, absolute
 ramp, never scaled to the current result set). Hovering a card swaps the
 corridors for that one row's route from `map_routes`, which follows the list's
-own pagination. A corridor or route the ONTD catalogue could not route is
-dashed, at either grain.
+own pagination, with a dot per stop — endpoints filled and labelled bold,
+intermediate stops hollow, every name shown (MapLibre resolves the label
+collisions). The corridors dim to a quarter rather than vanish, so the route
+keeps its context. Every fit (`fitPadding`) pads the frame by what is
+drawn over the map — the measured legend bottom-left, the chip stack
+top-left, the zoom control — plus room for a stop label beside a dot on
+the frame's edge, capped at two thirds of the map per axis so a phone-wide
+map still fits; without that, the legend covered the end of a route and
+edge labels were cut. A corridor or route the ONTD catalogue could not route is
+dashed, at either grain; a route with no geometry at all still shows its stops.
+
+**What the search highlights** stays on the map across hover, and a chip at
+the map's top-left repeats the search on every tab: the tab's icon and the
+search in words — "via Berlin Hbf", "Germany ↔ Spain". The chip says ↔ where
+the switch says →, deliberately: it states the filter (both places touched,
+either direction), not the control. A station search pins the
+searched station(s) in sapphire — the pin replaces the route's own dot
+there, and the frame always includes it. A city search pins the city once,
+at its centroid and a step larger; the hovered route's own stop in that
+city keeps its dot and label. A country or country-pair search tints the
+country's land outline in its own colour, teal (`COUNTRY_COLOR`), the second
+of a pair a shade lighter — not route blue, whose outline read as one more
+proposal line; the country is an area and must not compete with anything
+drawn as a line, so its border is thin and the same teal.
+The outlines are a static asset, `assets/country_shapes.json`, Natural Earth
+admin-0 at 1:50m built by `scripts/build_country_shapes.mjs`
+(`npm run build:country-shapes`, output committed, ~50 kB gzipped, loaded on
+the first country filter via `lib/countryShapes.ts`). Deliberately NOT the
+backend's `country_geom`: that is the Marine Regions EEZ + land union, chosen
+so belt and tunnel crossings attribute to a country, and it would tint the
+North Sea. The gallery keeps _filtering_ on the EEZ attribution — a route that
+touches Denmark only through the Øresund lists under Denmark — and only
+_draws_ the coastline. The stops store is fetched when the gallery mounts
+(not only when a stop is searched) so the markers can be placed from the
+first hover; the context legend rows appear only while their mark is on the
+map.
 
 **Three requests per query.** Every list page asks for `summaries` +
 `map_routes` only; the corridor overview is a separate `map_lines` request
@@ -426,8 +572,14 @@ rebuildable). Opening a card hands the scenario to the proposal view through
 proposal's family is there — a stored proposal always loads on the base,
 because that is what it is stored on.
 
-**Filters.** Source ("all" / proposals / existing) and sort round-trip through
-the query string, as does the ownership switch (`?mine=1`). "Mine" adds the
+**Filters.** The "Show" strip holds two segmented switches: source (all /
+proposals / existing — a dropdown until 2026-10-04) and ownership. Defaults
+(decided 2026-10-04): **proposals**, all owners, the typical-night-train
+preset, the base scenario, **newest created first**. Source and sort
+round-trip through the query string (`?src=all|existing` only off the
+default, `?sort&dir` always), as does the ownership switch (`?mine=1`).
+Switching to existing trains alone drops a sort the ONTD rows cannot carry
+(created, updated, likes, CO₂) back to distance. "Mine" adds the
 signed-in account's `user_ids` and pins `sources` to proposals, since an
 existing row has no owner — picking it while the list shows existing trains
 alone moves the source switch with it. The switch is always on screen whatever
@@ -481,19 +633,22 @@ after the results do, so a plain browser anchor would resolve against nothing.
 appear — source switch, map legend and card badge all say "Proposals" and
 "Existing" (German: "Vorschläge" / "Bestehend"). Keep them in step: they are
 three separate keys under `gallery.source.*`, `gallery.map.legend.*` and
-`gallery.card.existing`.
+`gallery.card.existing`. The search bar's nouns likewise: `gallery.tabs.*`
+(the three places), `gallery.kind.*` (via / from → to and their hint lines)
+and `gallery.search.*` (field labels and placeholders per place).
 
 ## Available Scripts
 
-| Command                | Description                          |
-| ---------------------- | ------------------------------------ |
-| `npm run dev`          | Start Vite dev server with HMR       |
-| `npm run build`        | Type-check then build for production |
-| `npm run type-check`   | `vue-tsc --noEmit` (used in CI)      |
-| `npm run lint`         | ESLint report                        |
-| `npm run lint:fix`     | ESLint auto-fix                      |
-| `npm run format`       | Prettier write                       |
-| `npm run format:check` | Prettier check (used in CI)          |
+| Command                        | Description                                                                                                                         |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run dev`                  | Start Vite dev server with HMR                                                                                                      |
+| `npm run build`                | Type-check then build for production                                                                                                |
+| `npm run type-check`           | `vue-tsc --noEmit` (used in CI)                                                                                                     |
+| `npm run lint`                 | ESLint report                                                                                                                       |
+| `npm run lint:fix`             | ESLint auto-fix                                                                                                                     |
+| `npm run format`               | Prettier write                                                                                                                      |
+| `npm run format:check`         | Prettier check (used in CI)                                                                                                         |
+| `npm run build:country-shapes` | Rebuild `src/assets/country_shapes.json` from Natural Earth (`world-atlas`); run after changing the country list, commit the output |
 
 ---
 

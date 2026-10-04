@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, START_LOCATION } from 'vue-router'
+import { GALLERY_HASH } from '@/lib/galleryEntry'
 import Gallery from '@/components/Gallery.vue'
 import ProposalWorkspace from '@/components/ProposalWorkspace.vue'
 
@@ -16,6 +17,10 @@ export const router = createRouter({
     // without this the gallery reopens halfway down at the map instead of at
     // its hero — the page's intended entry point.
     if (from === START_LOCATION) return { top: 0 }
+    // "#gallery" asks for the gallery proper, below the pitch; Gallery.vue
+    // scrolls there itself once it is active (lib/galleryEntry.ts), so the
+    // router neither jumps to the top first nor restores an older offset.
+    if (to.hash === GALLERY_HASH) return false
     if (savedPosition) return savedPosition
     // A query-only change on the same route is not navigation. The gallery
     // reflects its whole search bar into the query string (Gallery.vue's

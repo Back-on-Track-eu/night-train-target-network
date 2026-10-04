@@ -13,3 +13,8 @@ node_modules/
 cost/
 reference/
 .vitepress/generated-sidebar.json
+
+# Report data, written by backend/scripts/crowdsourcing_report.py (figures
+# per edition, the shared Europe basemap). Same reasoning as the emitter
+# output above: the script owns the file, prettier must not reshape it.
+reports/data/

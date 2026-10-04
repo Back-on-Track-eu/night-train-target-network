@@ -77,6 +77,15 @@ is the foundation for all OD-proportional cost allocations in the view layer.
 
 ## views.py — Breakdown tree and views
 
+> The reader-facing version of this section — layers 1–3 for someone who
+> has never seen a share table — is the documentation site's
+> `docs-site/views.md` ("Breakdown views"), and its `{#full-route}`,
+> `{#by-country}`, `{#by-route-section}`, `{#by-stop}`, `{#units}` anchors
+> are linked from the builder's view tabs (`frontend/src/lib/docsLinks.ts`).
+> A change to the allocation rules in `views.py` is mirrored there in the
+> same change.
+
+
 ### Breakdown tree
 
 ```

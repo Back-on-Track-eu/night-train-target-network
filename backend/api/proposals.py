@@ -55,7 +55,8 @@ def filter_proposals():
     (`user_ids`, `composition_ids`, `proposal_ids`) an OR-only value
     list, `name` a substring; `countries`/`stop_ids` accept a plain list
     (OR/"any" — the default) or {"values": [...], "mode": "any"|"all"}
-    for AND/"all". `trip_windows` matches a single trip's timetable,
+    for AND/"all", and `cities` (OSM place-node ids, resolved through the
+    stop catalogue) the same shape. `trip_windows` matches a single trip's timetable,
     `bbox` a viewport intersection. `include` picks which response
     sections to compute — only the sections asked for run their query.
     `route_builder_version`/`calc_version`/`scenario_id` are not

@@ -90,7 +90,7 @@ Usage (typical, on the server, from backend/):
   uv run python scripts/precompute_route_segments.py --graph infra_2026 --load
 
 Usage (overnight on a laptop, upload by hand afterwards — full runbook in
-docs/2026-09-21_route_cache_precompute_laptop_runbook.md):
+docs/ROUTE_CACHE_LAPTOP_RUNBOOK.md):
   uv run python scripts/precompute_route_segments.py --graph infra_2026 --cap-km 800 --workers 4 --stop-after-h 10
   uv run python scripts/precompute_route_segments.py --graph infra_2026 --cap-km 800 --finalize
   uv run python scripts/precompute_route_segments.py --graph infra_2026 --export-upload --split-mb 250

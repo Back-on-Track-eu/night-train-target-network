@@ -428,7 +428,7 @@ def get_member_cache():
 def get_family_document_cache():
     """
     Return the singleton FamilyDocumentCache (family.documents — the
-    §2.5 document cache). Raises DataNotLoadedError if init() has not
+    family document cache). Raises DataNotLoadedError if init() has not
     completed successfully.
     """
     if not _loaded or _family_document_cache is None:

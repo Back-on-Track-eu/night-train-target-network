@@ -56,9 +56,11 @@ either. Note it in `notes` and raise it instead of bending a column.
   `refurbished` composition cannot appear in a `new` one.
 - **Material strategy** is what the operator runs, not what the concept
   aspires to: a startup launching on converted used coaches is
-  `refurbished` (53 k€/m refit, 12-year amortisation, 0.80 availability,
-  1.30 €/coach-km, 200 km/h Vectron). `new` is a new-build order (145 k€/m,
-  30 years, 0.909, 1.00 €/coach-km, 230 km/h Vectron).
+  `refurbished` (refit price per metre, shorter amortisation, lower
+  availability, higher maintenance per coach-km, 200 km/h Vectron); `new`
+  is a new-build order (230 km/h Vectron). The figures behind the two
+  families are calibrated in `../CALIBRATION.md` (fleet table) and live in
+  the seed, not here.
 - **Locomotive** follows the family: `VECTRON-MS-200` for refurbished,
   `VECTRON-MS-230` for new. The lease rate is derived per family, so a
   deviation needs its own rate before it can be used. Two ids

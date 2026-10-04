@@ -7,6 +7,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 // so every map component shares one call — see lib/maplibreWorker.ts.
 import '@/lib/maplibreWorker'
 import { octilinearPath } from '@/utils/octilinear'
+import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '@/lib/mapFonts'
 import { mdiPlus, mdiClose } from '@mdi/js'
 
 // Three sources/layers for the line, painted bottom to top: the family's other
@@ -49,10 +50,6 @@ const ALT = '#8b9bb4'
 // tint than the corresponding line/marker.
 const LABEL_PRIMARY = '#15517f'
 const LABEL_DIMMED = '#7aa6d0'
-// Font stacks the basemap's own glyph server already serves (see the Carto
-// positron style): bold for the route endpoints, regular for intermediate stops.
-const FONT_BOLD = ['Montserrat Medium', 'Open Sans Bold', 'Noto Sans Regular']
-const FONT_REGULAR = ['Montserrat Regular', 'Open Sans Regular', 'Noto Sans Regular']
 // Sentinel for "no travel time available" in feature properties, which cannot
 // carry null through MapLibre's GeoJSON serialisation reliably.
 const NO_TRAVEL_TIME = -1
@@ -764,7 +761,12 @@ function initLayers() {
     source: STOPS_SOURCE,
     layout: {
       'text-field': ['get', 'name'],
-      'text-font': ['case', ['get', 'endpoint'], ['literal', FONT_BOLD], ['literal', FONT_REGULAR]],
+      'text-font': [
+        'case',
+        ['get', 'endpoint'],
+        ['literal', MAP_FONT_BOLD],
+        ['literal', MAP_FONT_REGULAR],
+      ],
       'text-size': ['case', ['get', 'endpoint'], 13, 11],
       'text-max-width': 8,
       'text-padding': 3,

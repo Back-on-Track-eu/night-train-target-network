@@ -318,6 +318,71 @@ class TestFilterKinds:
         )
         assert resp.status_code == 400
 
+
+def _city_of(db_conn, stop_id: str) -> int:
+    """The catalogue's city_osm_id for a stop — read back rather than
+    hardcoded, so the test follows the catalogue instead of pinning an
+    OSM id that a stop pipeline re-run could change."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT city_osm_id FROM input_params.stop_infrastructures "
+            "WHERE stop_id = %s AND city_osm_id IS NOT NULL LIMIT 1",
+            (stop_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        pytest.skip(f"{stop_id} carries no city in this catalogue")
+    return row[0] if isinstance(row, tuple) else row["city_osm_id"]
+
+
+class TestCityFilter:
+    """`cities` (backend 0.5.15): a row matches when one of its stops
+    belongs to the city — resolved through the stop catalogue's
+    city_osm_id at query time, nothing stored on the projection. Mode
+    "all" is the gallery's "from Berlin to Wien": every city touched."""
+
+    def test_any_matches_a_stop_in_the_city(self, api_base, published, db_conn):
+        berlin = _city_of(db_conn, _STOPS[0])
+        hit = _gallery(api_base, filter={"cities": [berlin]})
+        assert published["proposal_id"] in _proposal_ids(hit)
+
+        miss = _gallery(api_base, filter={"cities": [-1]})
+        assert published["proposal_id"] not in _proposal_ids(miss)
+
+    def test_all_requires_every_city(self, api_base, published, db_conn):
+        berlin = _city_of(db_conn, _STOPS[0])
+        wien = _city_of(db_conn, _STOPS[1])
+        both = _gallery(
+            api_base, filter={"cities": {"values": [berlin, wien], "mode": "all"}}
+        )
+        assert published["proposal_id"] in _proposal_ids(both)
+
+        with_stranger = _gallery(
+            api_base, filter={"cities": {"values": [berlin, -1], "mode": "all"}}
+        )
+        assert published["proposal_id"] not in _proposal_ids(with_stranger)
+
+    def test_spans_sources(self, api_base, published, existing_routes, db_conn):
+        """Existing rows carry stop_ids in the same namespace, so the
+        catalogue lookup reaches them too."""
+        berlin = _city_of(db_conn, _STOPS[0])
+        body = _gallery(api_base, filter={"cities": [berlin], "sources": ["existing"]})
+        route_ids = {
+            p["route_id"]
+            for p in body["summaries"]["proposals"]
+            if p["source"] == "existing"
+        }
+        assert _EXISTING_ROUTE_IDS[0] in route_ids
+
+    def test_rejects_non_integer_ids(self, api_base):
+        resp = requests.post(
+            f"{api_base}{PROPOSALS_URL}",
+            json={"filter": {"cities": ["Berlin"]}},
+            timeout=15,
+        )
+        assert resp.status_code == 400
+        assert "integers" in resp.text
+
     def test_created_at_range_filter(self, api_base, published):
         # filter by proposal_ids, not user_ids — by this point in the
         # module the same script user may own more than one proposal

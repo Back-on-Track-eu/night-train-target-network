@@ -44,6 +44,9 @@ export default defineConfig({
     'behind it: what a route costs, where the data comes from, and what it assumes.',
   cleanUrls: true,
 
+  // Folder notes for maintainers (reports/README.md), not pages.
+  srcExclude: ['**/README.md'],
+
   // The app has exactly one look: a fixed dark page, no light mode and no
   // toggle (frontend/src/style.css:3-5). Offering a light theme here would
   // mean inventing a second palette the brand does not have, so the switch
@@ -90,7 +93,8 @@ export default defineConfig({
     nav: [
       { text: 'About', link: '/' },
       { text: 'Data sources', link: '/sources/' },
-      { text: 'Costs', link: '/cost/total-cost' },
+      { text: 'Costs & revenues', link: '/cost/total-cost' },
+      { text: 'Updates', link: '/updates/2026-09' },
       { text: 'Feedback', link: '/feedback' },
       // "Open the tool" used to sit here. It is in the masthead now
       // (.vitepress/theme/components/SiteBrandBar.vue), which is where the
@@ -112,6 +116,17 @@ export default defineConfig({
       // model chapters below.
       { text: 'About', link: '/' },
       { text: 'Feedback', link: '/feedback' },
+      // What changed and what the crowd did with it: one product update a
+      // month (updates/) and a report per milestone (reports/). Newest
+      // first; each edition is a page, so the group grows by one line a
+      // month. Conventions and the data pipeline: reports/README.md.
+      {
+        text: 'Product and development updates',
+        items: [
+          { text: 'Product update: September 2026', link: '/updates/2026-09' },
+          { text: 'Launch report: the first twelve days', link: '/reports/2026-10-launch' },
+        ],
+      },
       {
         text: 'The model',
         items: [
@@ -119,15 +134,17 @@ export default defineConfig({
           { text: 'Scenarios and main figures', link: '/scenarios' },
           { text: 'Route planning', link: '/routing' },
           { text: 'Stop catalogue', link: '/stops' },
-          { text: 'Demand and revenue', link: '/demand' },
-          { text: 'Views of costs and revenue', link: '/views' },
+          // Named for their inputs (what you set) so that "revenue", the
+          // output, appears once in the tree — under Costs & revenues.
+          { text: 'Demand and fares', link: '/demand' },
+          { text: 'Breakdown views', link: '/views' },
           { text: 'Price basis: 2032 prices', link: '/price-basis' },
           { text: 'Emissions', link: '/emissions' },
           { text: 'Known gaps', link: '/not-modelled' },
         ],
       },
       // Generated from CALC_TREE — see render_site.py::render_sidebar.
-      { text: 'Costs', items: costSidebar },
+      { text: 'Costs & revenues', items: costSidebar },
       {
         text: 'Calibration',
         items: [
@@ -149,7 +166,10 @@ export default defineConfig({
     footer: {
       message:
         'Published by Back-on-Track. Every number on this site is generated from the ' +
-        'model that produces the tool’s results.',
+        'model that produces the tool’s results. Text, figures and charts: ' +
+        '<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a> ' +
+        '· code: <a href="https://github.com/Back-on-Track-eu/night-train-target-network/blob/staging/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0-or-later</a> ' +
+        '· map data © OpenStreetMap contributors.',
     },
 
     editLink: {

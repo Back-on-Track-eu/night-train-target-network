@@ -69,6 +69,12 @@ in your country, a feature the tool needs: the [feedback form](/feedback)
 takes all of it and reaches the working group. Every page here also ends with
 a short form for a correction to that page alone.
 
+The text and figures on this site are published under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — quote and reuse
+them with credit to Back-on-Track; the tool's source code is on
+[GitHub](https://github.com/Back-on-Track-eu/night-train-target-network)
+under the GPL.
+
 [paper]: https://back-on-track.eu/back-on-track-europes-general-position-paper/
 
 <FeedbackForm />

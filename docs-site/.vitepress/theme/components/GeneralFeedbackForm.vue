@@ -30,6 +30,7 @@ const AUTH_COOKIE = 'nt_auth'
  *   ?topic=composition                                    (gallery button)
  *   ?topic=routing|timetable&q=<A → B>&context=<inputs>   (map action pill)
  *   ?topic=<panel>&q=<panel · A → B>&context=<inputs>     (result panels)
+ *   ?topic=feature                                        (product update page)
  * `lead` opens the message: what the reader is asked to describe, or what
  * already happened.
  */
@@ -67,6 +68,17 @@ const TOPICS: Record<string, Topic> = {
       'Purchase or lease price, if known, and its source: \n' +
       'Why this formation belongs in the target network: \n' +
       'Sources (links, documents): ',
+  },
+  // "Suggest a feature" on the monthly product update (updates/). The
+  // category is free text below the category level (feedback_serialize.py),
+  // so the sub-category is left for the reader's own few words.
+  feature: {
+    category: 'Feature request',
+    subCategory: '',
+    subject: 'Feature request',
+    lead: () =>
+      'What should the tool do that it does not do today? Say what you were ' +
+      'trying to achieve, where in the tool you were, and what would have helped.',
   },
   routing: {
     category: 'Route or timetable',

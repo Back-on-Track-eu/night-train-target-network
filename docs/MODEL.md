@@ -19,8 +19,8 @@ change: `cd backend && uv run python scripts/generate_model_docs.py`.
 calibration — [CALIBRATION.md](../backend/models/compositions/calib/CALIBRATION.md) ·
 model layer overview — [models/README.md](../backend/models/README.md) ·
 database layer & versioning — [db/README.md](../backend/db/README.md) ·
-stop catalog classification — [STOP_CLASSIFICATION.md](../backend/models/infrastructure/STOP_CLASSIFICATION.md) ·
-proposals subsystem design — [PROPOSALS_DESIGN.md](PROPOSALS_DESIGN.md) ·
+stop catalog classification — [stops/README.md](../backend/models/infrastructure/stops/README.md) ·
+proposals subsystem — [adapters/proposal/README.md](../backend/adapters/proposal/README.md) ·
 API reference — [api/README.md](../backend/api/README.md)
 
 ---
@@ -73,7 +73,7 @@ station parameters).
 | Cost & revenue evaluation | `0.9.34` | Cost and revenue evaluation: computes the operator's fixed and variable costs, the charges paid to infrastructure companies, and the ticket revenue of a route, then aggregates the result into views per route, trip pair, country, connection, route section, and stop. | [`model.py`](../backend/models/evaluation/model.py) | [README.md](../backend/models/evaluation/README.md) |
 | Emissions model | `0.2.0` | Climate impact factors: how many grams of CO2-equivalent one passenger-kilometre causes by night train, plane, and car, including the non-CO2 warming of aviation — used for the mode comparison and the CO2-savings estimate. The night-train value is a European average until a country-resolved, energy-based model replaces it. | [`model.py`](../backend/models/emissions/model.py) | [README.md](../backend/models/emissions/README.md) |
 | Composition cost model | `0.9.5` | Composition cost model: calibrated purchase, maintenance, cleaning, crew, and availability parameters per train composition, in a 'new' and a 'refurbished' rolling stock family, at 2032 prices. | [`model.py`](../backend/models/compositions/model.py) | [CALIBRATION.md](../backend/models/compositions/calib/CALIBRATION.md) |
-| Infrastructure parameter model | `0.9.7` | Infrastructure parameter model: per-country track access charges, station charges, traction energy prices, shunting and stabling, terrain, schedule supplements and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. Four calibrated domains, each a package under models/infrastructure/ with its own source register, notebooks and published calibration document. | [`model.py`](../backend/models/infrastructure/model.py) | [STOP_CLASSIFICATION.md](../backend/models/infrastructure/STOP_CLASSIFICATION.md) |
+| Infrastructure parameter model | `0.9.7` | Infrastructure parameter model: per-country track access charges, station charges, traction energy prices, shunting and stabling, terrain, schedule supplements and minimum stopping times, with EU-average fallbacks — plus the catalog of possible night train stops. Four calibrated domains, each a package under models/infrastructure/ with its own source register, notebooks and published calibration document. | [`model.py`](../backend/models/infrastructure/model.py) | [README.md](../backend/models/infrastructure/stops/README.md) |
 <!-- END GENERATED: versions -->
 
 ---

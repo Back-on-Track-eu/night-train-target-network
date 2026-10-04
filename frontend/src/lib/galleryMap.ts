@@ -2,7 +2,7 @@
 // of Gallery.vue / GalleryMap.vue so they can be unit-tested (the frontend test
 // setup never mounts components — see the project's testing note).
 
-import type { MapCorridorFeature, MapLinesSection, MapRouteFeature } from '@/types/api'
+import type { MapLinesSection, MapRouteFeature, ProposalSourceKind, Stop } from '@/types/api'
 
 // --- Country relations -------------------------------------------------------
 
@@ -75,6 +75,11 @@ export function corridorPresenceFilter(kind: CorridorKind): unknown[] {
   return ['>', ['get', CORRIDOR_COUNT_PROPERTIES[kind]], 0]
 }
 
+/** How far the corridors fade while a card is hovered — dimmed rather than
+ *  hidden (decided 2026-10-04), so the isolated route keeps its context: the
+ *  reader still sees where the rest of the result set runs. */
+export const CORRIDOR_DIM_FACTOR = 0.25
+
 /** Width of the isolated route while a card is hovered. Flat, because with one
  *  route on screen the count ramp has nothing to compare against — varying
  *  thickness along a single itinerary would imply a difference that isn't there. */
@@ -133,6 +138,178 @@ export const ROUTE_DASH_PATTERN = [2, 1.5]
 export const ROUTED_FILTER = ['!=', ['get', 'geometry_routed'], false]
 export const UNROUTED_FILTER = ['==', ['get', 'geometry_routed'], false]
 
+// --- Stops and stations on the map -------------------------------------------
+
+/** A stop placed on the map: the row's own stops while its card is hovered,
+ *  or the station(s) the active search targets. */
+export interface GalleryStopMarker {
+  stop_id: string
+  name: string
+  lon: number
+  lat: number
+  /** A searched CITY rather than a station: pinned at the city's centroid
+   *  and drawn a step larger. Its id is not a stop id, so the hovered
+   *  route's own stops in that city keep their dots. */
+  city?: boolean
+}
+
+/** The searched station's pin — sapphire, the app's own ground colour, so it
+ *  reads as "yours" against both route colours. */
+export const ANCHOR_COLOR = '#1d1e33'
+export const ANCHOR_HALO = '#ffffff'
+
+/** Circle radii in px: the hovered route's stops, its two endpoints a step
+ *  larger, and the searched station's pin above both. */
+export const STOP_RADIUS = 4.5
+export const STOP_END_RADIUS = 6
+export const ANCHOR_RADIUS = 7.5
+export const ANCHOR_CITY_RADIUS = 9
+
+/** A selected country's tint. Its own hue — teal, away from both route
+ *  colours — because a blue outline read as one more proposal line (David,
+ *  2026-10-04): the country is an area, and its colour must not compete
+ *  with anything drawn as a line. */
+export const COUNTRY_COLOR = '#2a9d8f'
+
+/** Fill opacity of a selected country: the first pick, and the second of a
+ *  country pair a shade lighter so the two stay tellable apart. */
+export const COUNTRY_FILL_OPACITY: readonly [first: number, second: number] = [0.22, 0.12]
+
+/**
+ * Resolve stop ids against the stops store, keeping travel order and skipping
+ * ids the catalogue no longer carries (a retired stop on an old proposal) —
+ * one unknown id must not cost the row its other markers.
+ */
+export function stopMarkers(
+  stopIds: readonly string[],
+  stopsById: Map<string, Stop>,
+): GalleryStopMarker[] {
+  const markers: GalleryStopMarker[] = []
+  for (const id of stopIds) {
+    const stop = stopsById.get(id)
+    if (stop) markers.push({ stop_id: id, name: stop.name, lon: stop.lon, lat: stop.lat })
+  }
+  return markers
+}
+
+export interface StopPointProperties {
+  stop_id: string
+  name: string
+  /** Origin or terminus — drawn larger and labelled in bold. */
+  endpoint: boolean
+  source: ProposalSourceKind
+}
+
+export interface PointFeature<P> {
+  type: 'Feature'
+  geometry: { type: 'Point'; coordinates: [number, number] }
+  properties: P
+}
+
+export interface PointCollection<P> {
+  type: 'FeatureCollection'
+  features: PointFeature<P>[]
+}
+
+const pointFeature = <P>(marker: GalleryStopMarker, properties: P): PointFeature<P> => ({
+  type: 'Feature',
+  geometry: { type: 'Point', coordinates: [marker.lon, marker.lat] },
+  properties,
+})
+
+/**
+ * The hovered row's stops as point features. `exclude` is the searched
+ * station(s): they already carry a pin, and a dot underneath would only
+ * blur it.
+ */
+export function routeStopsCollection(
+  stops: readonly GalleryStopMarker[],
+  source: ProposalSourceKind,
+  exclude: ReadonlySet<string> = new Set(),
+): PointCollection<StopPointProperties> {
+  const last = stops.length - 1
+  return {
+    type: 'FeatureCollection',
+    features: stops.flatMap((stop, i) =>
+      exclude.has(stop.stop_id)
+        ? []
+        : [
+            pointFeature(stop, {
+              stop_id: stop.stop_id,
+              name: stop.name,
+              endpoint: i === 0 || i === last,
+              source,
+            }),
+          ],
+    ),
+  }
+}
+
+export interface AnchorPointProperties {
+  stop_id: string
+  name: string
+  city: boolean
+}
+
+/** The searched station(s) or city/cities as point features for the pin layers. */
+export function anchorCollection(
+  stops: readonly GalleryStopMarker[],
+): PointCollection<AnchorPointProperties> {
+  return {
+    type: 'FeatureCollection',
+    features: stops.map((stop) =>
+      pointFeature(stop, { stop_id: stop.stop_id, name: stop.name, city: stop.city ?? false }),
+    ),
+  }
+}
+
+// --- Countries ---------------------------------------------------------------
+
+/** One land outline per country from `assets/country_shapes.json` (built by
+ *  `scripts/build_country_shapes.mjs`). LAND, not the backend's EEZ union: the
+ *  gallery filters on the maritime attribution and draws the coastline. */
+export interface CountryShapeFeature {
+  type: 'Feature'
+  geometry: { type: 'MultiPolygon'; coordinates: [number, number][][][] }
+  properties: { country: string }
+}
+
+export interface CountryShapesCollection {
+  type: 'FeatureCollection'
+  features: CountryShapeFeature[]
+}
+
+export interface SelectedCountryProperties {
+  country: string
+  /** Position in the pick order: 0 for the (first) country, 1 for the second
+   *  of a pair — the fill opacity reads from it. */
+  rank: number
+}
+
+export type SelectedCountryFeature = Omit<CountryShapeFeature, 'properties'> & {
+  properties: SelectedCountryProperties
+}
+
+/**
+ * The selected country codes' outlines, ranked in pick order. A code without
+ * a shape (an unattributed "UNK", or a country outside the asset) is simply
+ * absent — the filter still applies, there is just nothing to tint.
+ */
+export function selectedCountriesCollection(
+  shapes: CountryShapesCollection | null,
+  codes: readonly string[],
+): { type: 'FeatureCollection'; features: SelectedCountryFeature[] } {
+  const features: SelectedCountryFeature[] = []
+  if (shapes) {
+    codes.forEach((code, rank) => {
+      const shape = shapes.features.find((f) => f.properties.country === code.toUpperCase())
+      if (shape)
+        features.push({ ...shape, properties: { country: shape.properties.country, rank } })
+    })
+  }
+  return { type: 'FeatureCollection', features }
+}
+
 // --- Rows on a corridor ------------------------------------------------------
 
 /** Which gallery row a corridor belongs to. Proposals are keyed by numeric id,
@@ -159,30 +336,58 @@ export function routeForRow(
 
 // --- Bounds ------------------------------------------------------------------
 
+type AnyGeometry =
+  | { type: 'Point'; coordinates: [number, number] }
+  | { type: 'LineString'; coordinates: [number, number][] }
+  | { type: 'MultiLineString'; coordinates: [number, number][][] }
+  | { type: 'Polygon'; coordinates: [number, number][][] }
+  | { type: 'MultiPolygon'; coordinates: [number, number][][][] }
+
+interface AnyFeature {
+  geometry: AnyGeometry | null
+}
+
+/** Every vertex of a geometry, whatever its nesting — the one walker all the
+ *  bounds helpers share. */
+function* vertices(geometry: AnyGeometry): Generator<[number, number]> {
+  switch (geometry.type) {
+    case 'Point':
+      yield geometry.coordinates
+      break
+    case 'LineString':
+      yield* geometry.coordinates
+      break
+    case 'MultiLineString':
+    case 'Polygon':
+      for (const line of geometry.coordinates) yield* line
+      break
+    case 'MultiPolygon':
+      for (const polygon of geometry.coordinates) for (const ring of polygon) yield* ring
+      break
+  }
+}
+
 /** [west, south, east, north] over every vertex, or null when there is nothing
- *  framable. Accepts both grains the map draws: corridor features carry a
- *  LineString, route features a MultiLineString, and either may be null. */
+ *  framable. Accepts every grain the map draws — corridor LineStrings, route
+ *  MultiLineStrings, stop Points and country MultiPolygons — and a null
+ *  geometry on any of them. */
 export function featureBounds(
-  features: (MapCorridorFeature | MapRouteFeature)[],
+  features: readonly AnyFeature[],
 ): [number, number, number, number] | null {
   let west = Infinity
   let south = Infinity
   let east = -Infinity
   let north = -Infinity
 
-  const extend = ([lon, lat]: [number, number]) => {
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return
-    if (lon < west) west = lon
-    if (lon > east) east = lon
-    if (lat < south) south = lat
-    if (lat > north) north = lat
-  }
-
   for (const feature of features) {
-    const geometry = feature.geometry
-    if (!geometry) continue
-    if (geometry.type === 'LineString') geometry.coordinates.forEach(extend)
-    else for (const line of geometry.coordinates) line.forEach(extend)
+    if (!feature.geometry) continue
+    for (const [lon, lat] of vertices(feature.geometry)) {
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue
+      if (lon < west) west = lon
+      if (lon > east) east = lon
+      if (lat < south) south = lat
+      if (lat > north) north = lat
+    }
   }
   return west === Infinity ? null : [west, south, east, north]
 }

@@ -1,9 +1,9 @@
 ---
-title: Views of costs and revenue
+title: Breakdown views
 description: How the cost and revenue breakdown is accounted for the full route, per country, per route section and per stop, and what the units mean.
 ---
 
-# Views of costs and revenue
+# Breakdown views
 
 <!-- The anchors on this page are linked from the builder's info overlays
      (frontend/src/lib/docsLinks.ts, DOCS_VIEW). The explicit {#…} ids keep

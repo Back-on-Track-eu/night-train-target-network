@@ -55,7 +55,7 @@ models/
 │       └── ...                      # Calibration notebooks, figures, and the generated CALIBRATION.md
 ├── infrastructure/
 │   ├── model.py                     # INFRA_MODEL_VERSION + WEEKDAY_BLEND
-│   ├── STOP_CLASSIFICATION.md       # Stop catalog classification pipeline
+│   ├── stops/README.md              # Stop catalog classification pipeline (+ charges/)
 │   ├── tac/
 │   │   ├── calc_tac.py              # Component track access charge per segment
 │   │   └── calib/                   # TAC calibration notebooks + TAC_CALIBRATION.md

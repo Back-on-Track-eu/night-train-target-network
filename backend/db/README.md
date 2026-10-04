@@ -272,6 +272,15 @@ python db/migrate.py --baseline   # record all as applied, execute nothing
 once, then never again. Deploys run `migrate.py` before starting the API, so
 a deployed backend can never meet a database missing its schema changes.
 
+Staging and production are never reseeded (since 2026-09-22 and the launch
+respectively), so `migrate.py` is the only way a schema change reaches
+them: a column that exists only in `schema.py` / the `create_*.sql` files
+reaches a server **by reseed alone** and therefore does not reach a server
+at all. Every new column, table, constraint or seeded row ships with a
+migration file; bulk changes to stored data go through a data task
+(next section). `docs/DEPLOY_HANDOVER.md` §5 has the column check to run
+before a deploy that reads a column added this way in the past.
+
 Editorial rule for the stop tables: base and HSR lineages stay identical only
 by construction — a stop-charge correction must **fan out to every current
 scenario lineage**, and a partial reseed of `input_params`/`scenario` that
@@ -530,7 +539,7 @@ Dev reseed drops the schema and bulk-loads any
 `scripts/precompute_route_segments.py --load`, or — when the batch ran on a
 machine without database access — through the staging table and merge SQL
 that `--export-upload` generates for a pgAdmin import
-(`docs/2026-09-21_route_cache_precompute_laptop_runbook.md`). Both paths are
+(`docs/ROUTE_CACHE_LAPTOP_RUNBOOK.md`). Both paths are
 `ON CONFLICT DO NOTHING` on `(routing_graph_key, stop_lo, stop_hi,
 variant_key)`, so a load never disturbs rows traffic already stored. Not
 versioned: a cache row is either right for its graph import or purged with
