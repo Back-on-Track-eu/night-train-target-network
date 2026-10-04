@@ -326,7 +326,24 @@ describe('anchorCollection', () => {
   test('one point per searched station, named', () => {
     const fc = anchorCollection(markers.slice(1, 2))
     expect(fc.features).toHaveLength(1)
-    expect(fc.features[0].properties).toEqual({ stop_id: 'DE:FRA', name: 'Frankfurt (Main) Hbf' })
+    expect(fc.features[0].properties).toEqual({
+      stop_id: 'DE:FRA',
+      name: 'Frankfurt (Main) Hbf',
+      city: false,
+    })
+  })
+
+  // A searched city is one pin at its centroid, flagged so the layer draws it
+  // larger — and its id is no stop id, so the city's stops keep their dots.
+  test('a city marker keeps its flag', () => {
+    const fc = anchorCollection([
+      { stop_id: 'city:240109189', name: 'Berlin', lon: 13.4, lat: 52.5, city: true },
+    ])
+    expect(fc.features[0].properties).toEqual({
+      stop_id: 'city:240109189',
+      name: 'Berlin',
+      city: true,
+    })
   })
 })
 
