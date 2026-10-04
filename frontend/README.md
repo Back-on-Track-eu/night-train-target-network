@@ -328,28 +328,43 @@ corridors for that one row's route from `map_routes`, which follows the list's
 own pagination. A corridor or route the ONTD catalogue could not route is
 dashed, at either grain.
 
-**Two requests per query.** Every list page asks for `summaries` +
+**Three requests per query.** Every list page asks for `summaries` +
 `map_routes` only; the corridor overview is a separate `map_lines` request
-(`fetchMapCorridors`, `loadCorridors()`), sent alongside the first page of
-each query. It aggregates the whole filtered set, so its cost grows with
-the catalogue — riding along with the first page let the unfiltered gallery
-time out (15 s interactive budget) before any card showed. It runs on the
-`heavy` budget instead (no deadline, cancellable), the cards render as soon
-as their page lands, and the map shows a "Loading map…" / retry chip until
-the corridors arrive. A sort change reloads the cards but keeps the
-corridors (same result set). Leaving the gallery while either request is in
-flight cancels it and remembers it, so coming back resumes the load instead
-of showing an empty column.
+(`fetchMapCorridors`, `loadCorridors()`) and the distribution panel's
+histograms a third (`fetchDistributions`, `loadDistributions()`), both sent
+alongside the first page of each query. The corridors aggregate the whole
+filtered set, so their cost grows with the catalogue — riding along with
+the first page let the unfiltered gallery time out (15 s interactive
+budget) before any card showed. They run on the `heavy` budget instead (no
+deadline, cancellable), the cards render as soon as their page lands, and
+the map shows a "Loading map…" / retry chip until the corridors arrive. A
+sort change reloads the cards but keeps corridors and histograms (same
+result set). Leaving the gallery while a request is in flight cancels it
+and remembers it, so coming back resumes the load instead of showing an
+empty column.
 
-**The "typical night train" toggle.** Next to the ownership pill, on by
-default, with the app's ⓘ overlay (`InfoHint`) naming the bounds: the
-position paper's yardstick — one way 500–2 000 km, 7–21 h, at least 50 km/h
-on average (`lib/typicalNightTrain.ts`, one place for the numbers; the
-overlay text is rendered from them). Three `POST /api/proposals` range
-filters with `scope: 'proposal'`, so they are asked of proposals only and
-**existing trains always stay listed** — they are the comparison, whether or
-not they meet the envelope. Off shows every proposal. In the URL only as
-`typical=0` when off — on is the default a shared link need not spell out.
+**The distribution panel** (`GalleryDistribution.vue`, pure logic in
+`lib/galleryRanges.ts`). Above the map: one histogram at a time — distance,
+duration, average speed or stops, picked from the dropdown — of the
+backend's `distributions` section, proposals in blue with existing trains
+stacked on top in orange, bars outside the range dimmed. The range is set
+three ways: dragging the two handles (snapping to bin edges; arrow keys
+work too), typing a bound (empty = none), or the "Typical night trains"
+pill, which is a **preset** of the four ranges — the position paper's
+yardstick, one way 500–2 000 km, 7–21 h, at least 50 km/h
+(`lib/typicalNightTrain.ts`, one place for the numbers; the ⓘ overlay text
+is rendered from them). The panel starts on it, a dragged handle or a typed
+bound leaves it, and the pill brings it back (or, when on, clears every
+range). All four ranges persist while the histogram switches and show as
+chips with an ×, so the reader always sees what is in effect. Each
+histogram is counted on the filter minus its own range, so a bar is what
+this one range keeps or drops of the set the other filters leave. Every
+range goes out with `scope: 'proposal'`: **existing trains always stay
+listed**, they are the comparison, whether or not they meet the envelope.
+A drag commits once, on release — one reload per gesture, not per pixel.
+In the URL: nothing for the preset; otherwise each bounded measure as
+`km=500-2000`, `h=7-21`, `kmh=50-`, `stops=-8` (an empty side is open),
+and `typical=0` for no ranges at all (also read from older links).
 
 **The scenario the figures are read on.** Every suggestion is stored once per
 scenario variant on the backend (§5.4a), so `GalleryScenarioPanel.vue` — the

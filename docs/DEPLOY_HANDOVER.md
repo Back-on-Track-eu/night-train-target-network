@@ -1749,6 +1749,14 @@ the task runner in the background, so `admin.schema_migrations` and
 
 ---
 
+## 24a. Gallery distribution panel — backend 0.5.14, no migration (2026-10-04)
+
+`POST /api/proposals` gains an `include` section, `distributions` (four
+`width_bucket` aggregates over the gallery union, no geometry). Rebuild
+the api and frontend images; nothing to configure, no data task, no
+schema change. The gallery now sends three requests per query (cards,
+corridors, histograms). Stops applying once 0.5.14 is on production.
+
 ## 24. Frontend cache headers — frontend image rebuild only (2026-10-04)
 
 **Symptom on staging after #74:** typing the site URL showed the previous

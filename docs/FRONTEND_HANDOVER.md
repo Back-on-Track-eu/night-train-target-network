@@ -1215,6 +1215,28 @@ takes a `corridorsStatus` prop (`'idle' | 'loading' | 'failed'`) and emits
 and, for `map_routes`, simplified at ≈200 m — nothing on the client depends
 on the old precision.
 
+## 26. Gallery: the distribution panel — `POST /api/proposals` gains `distributions` (backend 0.5.14, 2026-10-04)
+
+One new `include` section, `"distributions"`: for each of
+`total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` an object
+`{origin, top, bin_width, bins: [{from, to, n_proposals, n_existing}],
+unknown: {n_proposals, n_existing}}`. The axis is fixed on the backend
+(0–4 000 km in 100 km bins, 0–48 h in 1 h, 0–160 km/h in 5 km/h, 2–26
+stops in ones), the last bin is open (`to: null`, values at or past the
+top), and `unknown` counts rows with no value (existing trains without
+figures). **Each measure is counted on the request's filter minus its own
+range** — the histogram under a pair of range handles shows what that one
+range keeps or drops. Request it on its own (`fetchDistributions`,
+interactive budget; four aggregates, no geometry, well under 100 ms).
+
+The gallery's four range filters (`lib/galleryRanges.ts`) replace the
+`typicalOnly` toggle: the "typical night trains" preset is one value of
+the ranges, `n_stops` joins the three `ProposalsFilter` range keys, and
+every range carries `scope: 'proposal'`. URL keys `km`, `h`, `kmh`,
+`stops` (`min-max`, empty side open) replace `typical=0`, which is still
+read. `GalleryDistribution.vue` is the panel (`v-model:ranges`,
+`distributions`, `status`, emits `retry`); `GalleryMap.vue` is unchanged.
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

@@ -959,8 +959,8 @@ every entry. Times are wall-clock `"HH:MM"` with an optional integer
 
 `include` defaults to `["summaries"]` if omitted. `limit`/`offset` only
 apply to the `summaries` section — `map_lines`/`map_stop_counts`/
-`map_country_counts` always reflect the full filtered set (the map isn't
-paginated).
+`map_country_counts`/`distributions` always reflect the full filtered set
+(the map isn't paginated).
 
 ```json
 {
@@ -1004,7 +1004,8 @@ paginated).
   "sort":    [{ "by": "likes_count", "dir": "desc" }],
   "limit":   50,
   "offset":  0,
-  "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
+  "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts",
+              "distributions"]
 }
 ```
 
@@ -1080,6 +1081,20 @@ paginated).
         "properties": { "country": "DE", "n_proposals": 4, "n_existing": 2, "n": 6 }
       }
     ]
+  },
+  "distributions": {
+    "total_distance_km": {
+      "origin": 0, "top": 4000, "bin_width": 100,
+      "bins": [
+        { "from": 0, "to": 100, "n_proposals": 3, "n_existing": 0 },
+        { "...": "40 bins of 100 km" },
+        { "from": 4000, "to": null, "n_proposals": 12, "n_existing": 0 }
+      ],
+      "unknown": { "n_proposals": 0, "n_existing": 27 }
+    },
+    "total_time_h": { "...": "0–48 h in 1 h bins" },
+    "avg_speed_kmh": { "...": "0–160 km/h in 5 km/h bins" },
+    "n_stops": { "...": "2–26 in bins of one" }
   }
 }
 ```
@@ -1173,6 +1188,16 @@ outside the 28-country catalog like `UA`/`TR`). Neither paginates.
 joined to the *current base* scenario's pinned `stop_infrastructures`
 snapshot for coordinates — ONTD stops that kept raw (unmapped) ids
 don't join the catalog and get no marker.
+
+`distributions` (backend 0.5.14) feeds the gallery's histogram panel: for
+each of the four shared measures, counts per fixed-width bin and per
+source, plus an `unknown` bucket for rows with no value (existing trains
+without figures). The axes are constants (`adapters/proposal/README.md`
+§7.1), the last bin is open (`to: null`), and **each measure is counted
+on the filter minus its own range** — so the chart a pair of range
+handles sits on shows what that one range keeps or drops of the set the
+other filters leave, and a range with `scope: "proposal"` leaves the
+existing side of every histogram whole.
 
 **Errors:** `400 validation_error` for an unknown filter/sort/include key,
 a malformed range/list/array-mode/trip_windows/bbox shape, an unknown
