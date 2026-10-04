@@ -117,6 +117,9 @@ frontend/
     │   ├── ctaButtonClass.ts   # Shared "Suggest a new route" pill styling
     │   ├── feedbackApi.ts      # Thin client for POST /api/feedback
     │   ├── selectPillPt.ts     # Shared PrimeVue Select pass-through styling
+    │   ├── galleryMap.ts       # Gallery map: corridor styling, stop/pin/country features, bounds
+    │   ├── countryShapes.ts    # Lazy loader for assets/country_shapes.json
+    │   ├── mapFonts.ts         # Glyph stacks shared by the builder and gallery maps
     │   └── uiLanguages.ts      # Language bar: order + which locales are live
     ├── composables/
     │   ├── useProposalFamily.ts  # One family request per evaluation; member lookups after
@@ -346,8 +349,29 @@ suggestion in front of the train already running there, each in its own colour
 and at its own count's thickness (`proposal_count` / `existing_count`, absolute
 ramp, never scaled to the current result set). Hovering a card swaps the
 corridors for that one row's route from `map_routes`, which follows the list's
-own pagination. A corridor or route the ONTD catalogue could not route is
-dashed, at either grain.
+own pagination, with a dot per stop — endpoints filled and labelled bold,
+intermediate stops hollow, every name shown (MapLibre resolves the label
+collisions). The corridors dim to a quarter rather than vanish, so the route
+keeps its context. A corridor or route the ONTD catalogue could not route is
+dashed, at either grain; a route with no geometry at all still shows its stops.
+
+**What the search highlights** stays on the map across hover. A station
+search (by station, or A→B) pins the searched station(s) in sapphire — the
+pin replaces the route's own dot there, and the frame always includes it. A
+country or country-pair search tints the country's land outline in route
+blue (the second of a pair a shade lighter) and names it in a chip top-left.
+The outlines are a static asset, `assets/country_shapes.json`, Natural Earth
+admin-0 at 1:50m built by `scripts/build_country_shapes.mjs`
+(`npm run build:country-shapes`, output committed, ~50 kB gzipped, loaded on
+the first country filter via `lib/countryShapes.ts`). Deliberately NOT the
+backend's `country_geom`: that is the Marine Regions EEZ + land union, chosen
+so belt and tunnel crossings attribute to a country, and it would tint the
+North Sea. The gallery keeps _filtering_ on the EEZ attribution — a route that
+touches Denmark only through the Øresund lists under Denmark — and only
+_draws_ the coastline. The stops store is fetched when the gallery mounts
+(not only when a stop is searched) so the markers can be placed from the
+first hover; the context legend rows appear only while their mark is on the
+map.
 
 **Three requests per query.** Every list page asks for `summaries` +
 `map_routes` only; the corridor overview is a separate `map_lines` request
@@ -485,15 +509,16 @@ three separate keys under `gallery.source.*`, `gallery.map.legend.*` and
 
 ## Available Scripts
 
-| Command                | Description                          |
-| ---------------------- | ------------------------------------ |
-| `npm run dev`          | Start Vite dev server with HMR       |
-| `npm run build`        | Type-check then build for production |
-| `npm run type-check`   | `vue-tsc --noEmit` (used in CI)      |
-| `npm run lint`         | ESLint report                        |
-| `npm run lint:fix`     | ESLint auto-fix                      |
-| `npm run format`       | Prettier write                       |
-| `npm run format:check` | Prettier check (used in CI)          |
+| Command                        | Description                                                                                                                         |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run dev`                  | Start Vite dev server with HMR                                                                                                      |
+| `npm run build`                | Type-check then build for production                                                                                                |
+| `npm run type-check`           | `vue-tsc --noEmit` (used in CI)                                                                                                     |
+| `npm run lint`                 | ESLint report                                                                                                                       |
+| `npm run lint:fix`             | ESLint auto-fix                                                                                                                     |
+| `npm run format`               | Prettier write                                                                                                                      |
+| `npm run format:check`         | Prettier check (used in CI)                                                                                                         |
+| `npm run build:country-shapes` | Rebuild `src/assets/country_shapes.json` from Natural Earth (`world-atlas`); run after changing the country list, commit the output |
 
 ---
 
