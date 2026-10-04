@@ -61,6 +61,7 @@ import {
   typicalNightTrainRanges,
   type GalleryRanges,
 } from '@/lib/galleryRanges'
+import { entersAtGallery, GALLERY_HASH } from '@/lib/galleryEntry'
 import { useApiFailure } from '@/composables/useApiFailure'
 import {
   seedToQuery,
@@ -712,11 +713,19 @@ const gallerySection = ref<HTMLElement | null>(null)
 // reads as a cut-off page.
 const GALLERY_SCROLL_MARGIN_PX = 24
 
-function scrollToGallery(): void {
+function scrollToGallery(behavior: 'smooth' | 'auto' = 'smooth'): void {
   const target = gallerySection.value
   if (!target) return
   const top = target.getBoundingClientRect().top + window.scrollY
-  window.scrollTo({ top: top - GALLERY_SCROLL_MARGIN_PX, behavior: 'smooth' })
+  window.scrollTo({ top: top - GALLERY_SCROLL_MARGIN_PX, behavior })
+}
+
+// A reader who arrived FOR the gallery (lib/galleryEntry.ts) is put in front
+// of it at once — no animation from the pitch, which they did not come to
+// read. After the layout above has settled: the hero sizes itself on mount.
+function openAtGalleryIfLinked(): void {
+  if (!entersAtGallery(route.hash, route.query)) return
+  requestAnimationFrame(() => scrollToGallery('auto'))
 }
 
 // --- Fitting the whole gallery into one screen ------------------------------
@@ -943,6 +952,8 @@ onMounted(async () => {
   await nextTick()
   hydrating = false
   resetAndLoad()
+  // Read before the replace below drops the hash from the address bar.
+  openAtGalleryIfLinked()
   router.replace({ query: currentSearchQuery() })
 
   measureRow()
@@ -1003,6 +1014,13 @@ onActivated(() => {
     loadDistributions()
   }
   interrupted.page = interrupted.corridors = false
+  // Back from a proposal (ProposalWorkspace pushes the hash): the gallery is
+  // cached, so this is the moment it comes back into view. The hash has done
+  // its job once read; the query stays as it was.
+  if (route.hash === GALLERY_HASH) {
+    requestAnimationFrame(() => scrollToGallery('auto'))
+    router.replace({ query: route.query })
+  }
 })
 </script>
 

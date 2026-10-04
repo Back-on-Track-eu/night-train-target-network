@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useStore } from '@/stores/store'
+import { GALLERY_HASH } from '@/lib/galleryEntry'
 import ProposalViewport from '@/components/ProposalViewport.vue'
 
 // Registered for BOTH /proposal-builder and /proposal/:id (router/index.ts) —
@@ -38,7 +39,7 @@ function onPublished(id: number) {
     :search-seed="searchSeed"
     :focus-section="focusSection"
     class="w-full max-w-6xl"
-    @back="router.push({ name: 'gallery' })"
+    @back="router.push({ name: 'gallery', hash: GALLERY_HASH })"
     @published="onPublished"
   />
 </template>
