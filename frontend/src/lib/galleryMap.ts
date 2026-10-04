@@ -75,15 +75,31 @@ export function corridorPresenceFilter(kind: CorridorKind): unknown[] {
   return ['>', ['get', CORRIDOR_COUNT_PROPERTIES[kind]], 0]
 }
 
-/** How far the corridors fade while a card is hovered — dimmed rather than
- *  hidden (decided 2026-10-04), so the isolated route keeps its context: the
- *  reader still sees where the rest of the result set runs. */
-export const CORRIDOR_DIM_FACTOR = 0.25
+/**
+ * How the corridors recede while a card is hovered: receded rather than hidden
+ * (decided 2026-10-04), so the isolated route keeps its context — the reader
+ * still sees where the rest of the result set runs — but in a neutral grey at
+ * low opacity rather than their own colours dimmed. Dimming alone did not
+ * work (David, 2026-10-04): with ~1,000 proposals the blue corridors overdraw
+ * each other back to full strength wherever they share track, and the hovered
+ * route, drawn in the same blue, vanished into them. Grey leaves hue to the one
+ * route that matters; the opacity is flat for both kinds because, receded,
+ * neither has anything left to say about which traffic it carried.
+ */
+export const CORRIDOR_RECEDED_COLOR = '#aeb6c0'
+export const CORRIDOR_RECEDED_OPACITY = 0.16
 
 /** Width of the isolated route while a card is hovered. Flat, because with one
  *  route on screen the count ramp has nothing to compare against — varying
  *  thickness along a single itinerary would imply a difference that isn't there. */
-export const CORRIDOR_ISOLATED_WIDTH = 3
+export const CORRIDOR_ISOLATED_WIDTH = 3.5
+
+/** The white casing drawn under the isolated route: a band `ROUTE_CASING_PAD`
+ *  px wider than the route on each side, so the line keeps a clear edge where
+ *  it runs over the receded corridors and the basemap's own railways. */
+export const ROUTE_CASING_COLOR = '#ffffff'
+export const ROUTE_CASING_PAD = 2.5
+export const ROUTE_CASING_WIDTH = CORRIDOR_ISOLATED_WIDTH + 2 * ROUTE_CASING_PAD
 
 /**
  * Width ramp keyed on a corridor count. Deliberately ABSOLUTE rather than scaled to
