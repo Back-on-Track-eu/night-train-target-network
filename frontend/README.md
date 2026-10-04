@@ -103,8 +103,7 @@ frontend/
     ├── i18n/
     │   ├── index.ts         # vue-i18n setup
     │   └── locales/
-    │       ├── en.json      # English strings
-    │       └── de.json      # German strings — same key tree, both change together
+    │       └── en.json      # English strings
     ├── stores/
     │   └── store.ts         # Pinia store
     ├── lib/
@@ -121,21 +120,16 @@ frontend/
     │   ├── galleryMap.ts       # Gallery map: corridor styling, stop/pin/country features, bounds
     │   ├── gallerySearch.ts    # Gallery search bar: tabs × kinds → request filter, city grouping
     │   ├── countryShapes.ts    # Lazy loader for assets/country_shapes.json
-    │   ├── detailsScope.ts     # Zone D: the change-scope rule (owns / waits), schedule + tariff arithmetic
-    │   ├── demandAllocation.ts # Zone D: the demand allocation, a port of models/demand (parity-tested)
-    │   ├── galleryRanges.ts    # Gallery range filters ↔ URL keys; the typical-night-train preset
-    │   ├── galleryEntry.ts     # Where /gallery opens: the pitch, or the gallery proper
-    │   ├── docsLinks.ts        # Builder ⓘ → documentation anchors (a contract with docs-site/)
     │   ├── mapFonts.ts         # Glyph stacks shared by the builder and gallery maps
     │   └── uiLanguages.ts      # Language bar: order + which locales are live
     ├── composables/
     │   ├── useProposalFamily.ts  # One family request per evaluation; member lookups after
-    │   ├── useFreshBuild.ts      # Reloads onto the current build after a deploy
     │   └── useMediaQuery.ts      # A reactive media query; LG_MEDIA_QUERY = Tailwind's lg
     ├── utils/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
         ├── AppIcon.vue                    # Tree-shakeable @mdi/js icon wrapper
+        ├── CompositionDetailOverlay.vue   # Composition detail popover — facts + formation
         ├── CompositionFormation.vue       # Formation drawing (Wagenstandsanzeiger)
         ├── CompareSection.vue             # Zone B: KPI picker, scenario bars, scenario × composition grid
         ├── CostRevenueBreakdown.vue       # Zone E: cost/revenue bars + the cube explorer (collapsible)
@@ -145,8 +139,7 @@ frontend/
         ├── MainKpiGrid.vue                # Zone A: the eight headline KPIs with deltas vs. baseline
         ├── ProposalResults.vue            # Everything below the map, zones A–E
         ├── ScenarioSwitches.vue           # Zone A: the scenario as three switches (+ measures, disabled)
-        ├── DetailsSection.vue             # Zone D: the Details card — five tabs (see below)
-        ├── details/                       # Zone D panels: SchedulePanel, PlacesPricesPanel, DemandTab, …
+        ├── SettingsSection.vue            # Zone D: supply table / demand notes (collapsible)
         ├── SupplyTable.vue                # Compositions compared on the current route + scenario
         ├── LandingIntro.vue               # Landing pitch above the gallery (copy lives in en.json)
         ├── MapView.vue                    # MapLibre route/stop map
@@ -190,7 +183,7 @@ others as `cellErrors.<code>`.
 
 **Coming-soon surfaces.** Three things are shown but disabled, each for a
 different reason: the "price & regulatory measures" toggles (the backend
-does not model them — `docs/PARKED_WORK.md` §4), the "fit to demand" column
+does not model them — `docs/PARKED_WORK.md` §3), the "fit to demand" column
 (the demand stopgap gives every composition the same utilisation), and the
 **Infra 2032** network (the routing instance runs and the backend evaluates
 it fine, but its infrastructure data is not at publishable quality yet).
@@ -206,71 +199,6 @@ the catalogue can be browsed without firing a calc per arrow click. Reverting
 to the selection the results were computed with clears the flag on its own. A
 diverged itinerary takes precedence — that is the Evaluate button's path,
 which also re-prompts for stop suggestions.
-
-## The Details card (zone D)
-
-`DetailsSection.vue` with the panels under `components/details/` — five
-tabs: Supply, Demand, Train operation, Infrastructure, Overhead. Three
-inputs change the calculation and each is a **scope**: the schedule and the
-prices (Supply tab), the demand (Demand tab). A panel either **owns** a
-scope — it recomputes on the page and says so (the Schedule panel previews
-its own frequency) — or **waits** on one: it keeps the figures it has,
-greys out, and shows the dot beside the tab label until the backend has
-answered. Nothing ever shows a number that mixes a previewed input with a
-calculated one. Which tab waits on what is `TAB_AWAITS` in
-`lib/detailsScope.ts`:
-
-| tab             | owns             | waits on                           |
-| --------------- | ---------------- | ---------------------------------- |
-| Supply          | schedule, prices | demand (the What-follows panel)    |
-| Demand          | demand           | — (previews everything it changes) |
-| Train operation | —                | schedule, prices, demand           |
-| Infrastructure  | —                | schedule                           |
-| Overhead        | —                | schedule, prices, demand           |
-
-Three data sources feed the card, and a panel says which one it reads:
-the family document's summary row (every member, always there), the
-member's views and `operations` (one member, fetched on demand), and the
-stored proposal (the creator's committed inputs). One `InfoHint` per
-panel, never per figure.
-
-**Parity rule.** The demand arithmetic exists twice — `models/demand/` in
-Python and `lib/demandAllocation.ts` + `lib/odMatrix.ts` here, so the Demand
-tab can preview without a round trip. `backend/tests/test_83_demand_units.py`
-writes `tests/fixtures/demand_reference.json`; the TypeScript suites read
-it. Change both sides together, run both suites, commit the fixture with
-the change.
-
-## Info overlays
-
-Every ⓘ in the builder opens the same `InfoPopover` (hover intent, or a
-click) with one shape: a short text, _Read more in the
-documentation_ (`DocsReadMore` → an anchor on the docs site) and _Provide
-feedback_ (`FeedbackLink` → `/docs/feedback?topic=…`). The text is **at
-most four lines at the overlay's `w-72` (288 px) column, in English and in German**;
-anything longer belongs on the linked documentation page, not in the
-overlay. The docs anchors are a contract: `lib/docsLinks.ts` on this side
-(`DOCS_DETAIL_PANEL`, `DOCS_VIEW`, …), the `{#id}` headings of
-`docs-site/*.md` on the other — rename one only together with the other.
-A new result panel needs three things: its overlay text (both locales), its
-docs anchor, and its feedback topic alias (`lib/feedbackLink.ts`, mirrored
-by the backend's result-panel sub-categories in
-`api/helpers/feedback_serialize.py`).
-
-## Translations
-
-`en.json` and `de.json` carry the same key tree and change in the same
-commit. Enabling a further language: add `i18n/locales/<code>.json`, register it
-in `i18n/index.ts`, add the code to `SUPPORTED` in `lib/localeStorage.ts`
-and flip its entry in `lib/uiLanguages.ts` to `available: true` (a listed
-language with `available: false` renders greyed out in the language bar).
-
-German wording, as reviewed on 2026-09-21: _Zugbildung_ for a composition
-(_Wagenreihung_ only when the order of the coaches is meant),
-_Schnellfahrstrecke_, _Relation_ for an OD pair, _Neuverkehr_ for induced
-travel, _Basisszenario_, _fixieren_ (never _pinnen_), _zu unmittelbaren
-Kosten_ for direct-cost track access; the reader is addressed as _Du_ /
-_Dein_, capitalised; dashes are spaced en dashes.
 
 ## Stop suggestions
 
@@ -378,14 +306,6 @@ calc failure carries a _Try again_ action on its toast.
 
 ## Gallery
 
-**Where the page opens.** `/gallery` is also the site's landing page, so
-the pitch (`LandingIntro.vue`) comes first for someone entering at the
-origin root or reloading a plain `/gallery`. Everyone else came for the
-gallery: a link that names a filter (any query key beyond the always
-written `tab`, `kind`, `sort`, `dir`), the `#gallery` hash the docs site's
-buttons and the proposal page's back pill carry — those open scrolled to
-the search bar and the map (`lib/galleryEntry.ts`, `scrollToGallery`).
-
 `Gallery.vue` is one screen with three parts: the search bar, the result
 column and the map beside it.
 
@@ -460,8 +380,13 @@ ramp, never scaled to the current result set). Hovering a card swaps the
 corridors for that one row's route from `map_routes`, which follows the list's
 own pagination, with a dot per stop — endpoints filled and labelled bold,
 intermediate stops hollow, every name shown (MapLibre resolves the label
-collisions). The corridors dim to a quarter rather than vanish, so the route
-keeps its context. Every fit (`fitPadding`) pads the frame by what is
+collisions). The corridors recede to a faint grey rather than vanish, so the
+route keeps its context, and the route itself sits on a white casing — grey
+rather than dimmed blue because, with a thousand proposals, dimmed corridors
+overdraw each other back to full strength wherever they share track and a
+same-blue route disappeared into them (`CORRIDOR_RECEDED_*`,
+`ROUTE_CASING_*` in `lib/galleryMap.ts`); the legend gains an "Other routes"
+row while a route is isolated. Every fit (`fitPadding`) pads the frame by what is
 drawn over the map — the measured legend bottom-left, the chip stack
 top-left, the zoom control — plus room for a stop label beside a dot on
 the frame's edge, capped at two thirds of the map per axis so a phone-wide
