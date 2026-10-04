@@ -147,6 +147,10 @@ export interface GalleryStopMarker {
   name: string
   lon: number
   lat: number
+  /** A searched CITY rather than a station: pinned at the city's centroid
+   *  and drawn a step larger. Its id is not a stop id, so the hovered
+   *  route's own stops in that city keep their dots. */
+  city?: boolean
 }
 
 /** The searched station's pin — sapphire, the app's own ground colour, so it
@@ -159,10 +163,17 @@ export const ANCHOR_HALO = '#ffffff'
 export const STOP_RADIUS = 4.5
 export const STOP_END_RADIUS = 6
 export const ANCHOR_RADIUS = 7.5
+export const ANCHOR_CITY_RADIUS = 9
+
+/** A selected country's tint. Its own hue — teal, away from both route
+ *  colours — because a blue outline read as one more proposal line (David,
+ *  2026-10-04): the country is an area, and its colour must not compete
+ *  with anything drawn as a line. */
+export const COUNTRY_COLOR = '#2a9d8f'
 
 /** Fill opacity of a selected country: the first pick, and the second of a
  *  country pair a shade lighter so the two stay tellable apart. */
-export const COUNTRY_FILL_OPACITY: readonly [first: number, second: number] = [0.18, 0.1]
+export const COUNTRY_FILL_OPACITY: readonly [first: number, second: number] = [0.22, 0.12]
 
 /**
  * Resolve stop ids against the stops store, keeping travel order and skipping
@@ -237,15 +248,18 @@ export function routeStopsCollection(
 export interface AnchorPointProperties {
   stop_id: string
   name: string
+  city: boolean
 }
 
-/** The searched station(s) as point features for the pin layers. */
+/** The searched station(s) or city/cities as point features for the pin layers. */
 export function anchorCollection(
   stops: readonly GalleryStopMarker[],
 ): PointCollection<AnchorPointProperties> {
   return {
     type: 'FeatureCollection',
-    features: stops.map((stop) => pointFeature(stop, { stop_id: stop.stop_id, name: stop.name })),
+    features: stops.map((stop) =>
+      pointFeature(stop, { stop_id: stop.stop_id, name: stop.name, city: stop.city ?? false }),
+    ),
   }
 }
 

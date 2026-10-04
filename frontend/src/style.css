@@ -62,7 +62,7 @@ html {
   display: none;
 }
 
-/* The search overlays of StopSelect.vue and CountrySelect.vue. A popover is
+/* The search overlays of StopSelect.vue and OptionSelect.vue. A popover is
    sized shrink-to-fit, which here means "as wide as the longest name in the
    list" — on a phone that ran off the right edge of the screen and scrolled
    the whole page sideways. A width inside the viewport instead, and the

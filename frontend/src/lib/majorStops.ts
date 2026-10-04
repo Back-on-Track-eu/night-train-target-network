@@ -40,7 +40,7 @@ const CAPITAL_CITY_BY_COUNTRY: Record<string, string> = {
 /** The capital stop for a country, if the given list has one. Where a
  * country has multiple stations matching its capital's name, the first
  * match is used — one station per capital, not every match. */
-export function capitalStopForCountry(stops: Stop[], countryCode: string): Stop | null {
+export function capitalStopForCountry(stops: readonly Stop[], countryCode: string): Stop | null {
   const cityName = CAPITAL_CITY_BY_COUNTRY[countryCode]
   if (!cityName) return null
   return stops.find((s) => s.country_code === countryCode && s.name.includes(cityName)) ?? null
@@ -48,7 +48,7 @@ export function capitalStopForCountry(stops: Stop[], countryCode: string): Stop 
 
 /** Every recognized national capital's stop in the given list — at most one
  * per country. */
-export function majorStops(stops: Stop[]): Stop[] {
+export function majorStops(stops: readonly Stop[]): Stop[] {
   return Object.keys(CAPITAL_CITY_BY_COUNTRY)
     .map((code) => capitalStopForCountry(stops, code))
     .filter((s): s is Stop => s !== null)

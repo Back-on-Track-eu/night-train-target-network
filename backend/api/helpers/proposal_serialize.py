@@ -54,6 +54,7 @@ from models.evaluation.summary import build_summary_row
 from adapters.proposal.filter_builder import (
     ALL_FILTER_KEYS,
     ARRAY_COLUMNS,
+    CITIES_KEY,
     DATETIME_RANGE_COLUMNS,
     LIST_COLUMNS,
     RANGE_COLUMNS,
@@ -200,28 +201,39 @@ def _validate_filters(filters) -> list[str]:
     ):
         errors.append("'filter.bbox' must be [west, south, east, north].")
 
+    cities = filters.get(CITIES_KEY)
+    if cities is not None:
+        errors += _validate_array_filter(CITIES_KEY, cities, value_type=int)
+
     return errors
 
 
-def _validate_array_filter(key: str, raw) -> list[str]:
-    """Either a plain list of strings (mode "any"/OR, the default) or
+def _validate_array_filter(key: str, raw, value_type: type = str) -> list[str]:
+    """Either a plain list (mode "any"/OR, the default) or
     {"values": [...], "mode": "any"|"all"} — see filter_builder.py's
-    _parse_array_filter()."""
+    _parse_array_filter(). Values are strings for the TEXT[] columns and
+    integers for `cities` (OSM place-node ids); bool is excluded from the
+    integer case because it is an int subclass in Python."""
+    noun = "integers" if value_type is int else "strings"
+
+    def ok(v) -> bool:
+        return isinstance(v, value_type) and not isinstance(v, bool)
+
     if isinstance(raw, list):
-        if all(isinstance(v, str) for v in raw):
+        if all(ok(v) for v in raw):
             return []
-        return [f"'filter.{key}' must be a list of strings."]
+        return [f"'filter.{key}' must be a list of {noun}."]
     if isinstance(raw, dict):
         errors = []
         values = raw.get("values")
-        if not (isinstance(values, list) and all(isinstance(v, str) for v in values)):
-            errors.append(f"'filter.{key}.values' must be a list of strings.")
+        if not (isinstance(values, list) and all(ok(v) for v in values)):
+            errors.append(f"'filter.{key}.values' must be a list of {noun}.")
         mode = raw.get("mode", "any")
         if mode not in _ARRAY_FILTER_MODES:
             errors.append(f"'filter.{key}.mode' must be 'any' or 'all'.")
         return errors
     return [
-        f"'filter.{key}' must be a list of strings, or "
+        f"'filter.{key}' must be a list of {noun}, or "
         f"{{'values': [...], 'mode': 'any'|'all'}}."
     ]
 

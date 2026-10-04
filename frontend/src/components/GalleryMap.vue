@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -8,6 +8,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 // the corrupt worker and no route line rendered anywhere in that session.
 import '@/lib/maplibreWorker'
 import {
+  ANCHOR_CITY_RADIUS,
   ANCHOR_COLOR,
   ANCHOR_HALO,
   ANCHOR_RADIUS,
@@ -17,6 +18,7 @@ import {
   CORRIDOR_ISOLATED_WIDTH,
   CORRIDOR_KINDS,
   CORRIDOR_OPACITY,
+  COUNTRY_COLOR,
   COUNTRY_FILL_OPACITY,
   ROUTE_DASH_PATTERN,
   ROUTED_FILTER,
@@ -38,8 +40,8 @@ import {
 } from '@/lib/galleryMap'
 import { loadCountryShapes } from '@/lib/countryShapes'
 import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '@/lib/mapFonts'
-import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import AppSpinner from '@/components/AppSpinner.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import type { MapLinesSection, MapRouteFeature, ProposalSourceKind } from '@/types/api'
 
 // Two grains and two kinds of highlight, one map:
@@ -58,9 +60,11 @@ import type { MapLinesSection, MapRouteFeature, ProposalSourceKind } from '@/typ
 //   so varying thickness along it would imply a difference that isn't there.
 //
 //   SEARCH HIGHLIGHTS — what the active search targets, persistent across
-//   hover: the searched station(s) as sapphire pins, and the selected country
-//   or country pair as a tinted land outline (lib/countryShapes.ts — LAND, not
-//   the backend's EEZ attribution polygons, which would tint the North Sea).
+//   hover: the searched station(s) or city/cities as sapphire pins (a city
+//   once, at its centroid, a step larger), the selected country or country
+//   pair as a tinted land outline (lib/countryShapes.ts — LAND, not the
+//   backend's EEZ attribution polygons, which would tint the North Sea), and
+//   the search in words in the chip top-left, whatever the tab.
 const EUROPE_BOUNDS: [number, number, number, number] = [-30, 27, 50, 73]
 const CORRIDORS_SOURCE = 'gallery-corridors'
 // Four corridor layers: solid and dashed per kind, added in CORRIDOR_KINDS
@@ -102,12 +106,15 @@ const props = defineProps<{
   /** ISO codes of the selected country, or the pair of a relation search, in
    *  pick order. */
   highlightedCountries?: string[]
+  /** The active search as the chip top-left shows it: the tab's icon and
+   *  the search in words — "via Berlin Hbf", "Germany ↔ Spain" (both
+   *  directions, because that is what the filter means). */
+  searchSummary?: { icon: string; text: string } | null
 }>()
 
 const emit = defineEmits<{ 'retry-corridors': [] }>()
 
 const { t } = useI18n()
-const { countryName } = useLocaleFormat()
 const mapContainer = ref<HTMLDivElement | null>(null)
 let map: maplibregl.Map | null = null
 let mapLoaded = false
@@ -128,21 +135,21 @@ const countries = computed(() => props.highlightedCountries ?? [])
 const selectedCountries = computed(() =>
   selectedCountriesCollection(countryShapes.value, countries.value),
 )
-// What the chip above the map says: the country, or the pair joined by an
-// arrow — the vocabulary is the search bar's, so the reader can tie them.
-const countryLabel = computed(() => {
-  const [a, b] = countries.value
-  if (a && b)
-    return t('gallery.map.highlight.relation', { from: countryName(a), to: countryName(b) })
-  return a ? countryName(a) : null
-})
-
 // Listed in stacking order, top layer first — the legend then reads the way
 // the map draws. The three context rows appear only while their mark is on
 // the map, so the legend never promises a symbol the reader cannot find.
 const legendItems = computed(() => [
   ...(anchors.value.length
-    ? [{ kind: 'anchor' as const, label: t('gallery.map.legend.anchor') }]
+    ? [
+        {
+          kind: 'anchor' as const,
+          label: t(
+            anchors.value.some((a) => a.city)
+              ? 'gallery.map.legend.city'
+              : 'gallery.map.legend.anchor',
+          ),
+        },
+      ]
     : []),
   ...(props.highlightedRow && (props.highlightedStops?.length ?? 0) > 0
     ? [{ kind: 'stop' as const, label: t('gallery.map.legend.stops') }]
@@ -165,9 +172,58 @@ const legendItems = computed(() => [
 const geoJsonSource = (id: string): maplibregl.GeoJSONSource | undefined =>
   map?.getSource(id) as maplibregl.GeoJSONSource | undefined
 
+// The overlays the fit must keep clear of: the top-left stack (loading chip,
+// search chip) and the legend bottom-left. Measured, because the legend grows
+// a row while a card is hovered and the chip's width is the search's.
+const topLeftOverlay = ref<HTMLDivElement | null>(null)
+const legendOverlay = ref<HTMLDivElement | null>(null)
+// Room for a stop label beside its dot at the frame's edge — the labels are
+// placed radially (left/right/top/bottom of the dot), so a point exactly on
+// the padded edge still gets its name inside the map. Width of a long
+// station name at 12 px, roughly.
+const LABEL_ALLOWANCE_PX = 120
+const LABEL_ALLOWANCE_Y_PX = 28
+const OVERLAY_GUTTER_PX = 12
+// MapLibre's zoom control top-right (29 px box + its 10 px margin).
+const ZOOM_CONTROL_PX = 48
+
+/**
+ * Padding for fitBounds, in px per side: the overlays' footprint where they
+ * sit, plus the label allowance everywhere. Capped so the two sides of an
+ * axis never eat more than two thirds of the map — MapLibre throws when the
+ * padding exceeds the canvas, and a phone-width map is not much wider than
+ * the legend.
+ */
+function fitPadding(): { top: number; right: number; bottom: number; left: number } {
+  const width = mapContainer.value?.clientWidth ?? 0
+  const height = mapContainer.value?.clientHeight ?? 0
+  const topLeft = topLeftOverlay.value
+  const legend = legendOverlay.value
+  const leftOverlay = Math.max(topLeft?.offsetWidth ?? 0, legend?.offsetWidth ?? 0)
+  const want = {
+    top: LABEL_ALLOWANCE_Y_PX + (topLeft?.offsetHeight ?? 0) + OVERLAY_GUTTER_PX,
+    right: LABEL_ALLOWANCE_PX + ZOOM_CONTROL_PX,
+    bottom: LABEL_ALLOWANCE_Y_PX + (legend?.offsetHeight ?? 0) + OVERLAY_GUTTER_PX,
+    left: LABEL_ALLOWANCE_PX + leftOverlay + OVERLAY_GUTTER_PX,
+  }
+  const scaleX = Math.min(1, (width * 2) / 3 / Math.max(1, want.left + want.right))
+  const scaleY = Math.min(1, (height * 2) / 3 / Math.max(1, want.top + want.bottom))
+  return {
+    top: Math.floor(want.top * scaleY),
+    right: Math.floor(want.right * scaleX),
+    bottom: Math.floor(want.bottom * scaleY),
+    left: Math.floor(want.left * scaleX),
+  }
+}
+
+/** Fit after the DOM has caught up with the legend/chip change that usually
+ *  accompanies the call, so the padding measures what will be on screen. */
 function fitTo(bounds: [number, number, number, number] | null, maxZoom: number) {
   if (!map || !bounds) return
-  map.fitBounds(bounds, { padding: 60, maxZoom, duration: 600 })
+  void nextTick(() => {
+    if (!map) return
+    map.fitBounds(bounds, { padding: fitPadding(), maxZoom, duration: 600 })
+  })
 }
 
 /** Frame the overview: the corridors, plus the searched station(s) and the
@@ -259,7 +315,7 @@ function initLayers() {
     type: 'fill',
     source: COUNTRIES_SOURCE,
     paint: {
-      'fill-color': CORRIDOR_COLORS.proposed,
+      'fill-color': COUNTRY_COLOR,
       'fill-opacity': [
         'case',
         ['==', ['get', 'rank'], 0],
@@ -273,7 +329,9 @@ function initLayers() {
     type: 'line',
     source: COUNTRIES_SOURCE,
     layout: { 'line-join': 'round' },
-    paint: { 'line-color': CORRIDOR_COLORS.proposed, 'line-width': 1.5, 'line-opacity': 0.9 },
+    // Thin and in the area's own colour: enough to close the shape against
+    // the sea, never mistakable for a route.
+    paint: { 'line-color': COUNTRY_COLOR, 'line-width': 1.2, 'line-opacity': 0.8 },
   } as maplibregl.LayerSpecification)
 
   map.addSource(CORRIDORS_SOURCE, {
@@ -403,7 +461,7 @@ function initLayers() {
     type: 'circle',
     source: ANCHORS_SOURCE,
     paint: {
-      'circle-radius': ANCHOR_RADIUS + 5,
+      'circle-radius': ['case', ['get', 'city'], ANCHOR_CITY_RADIUS + 6, ANCHOR_RADIUS + 5],
       'circle-color': 'transparent',
       'circle-stroke-color': ANCHOR_COLOR,
       'circle-stroke-width': 1.5,
@@ -415,7 +473,7 @@ function initLayers() {
     type: 'circle',
     source: ANCHORS_SOURCE,
     paint: {
-      'circle-radius': ANCHOR_RADIUS,
+      'circle-radius': ['case', ['get', 'city'], ANCHOR_CITY_RADIUS, ANCHOR_RADIUS],
       'circle-color': ANCHOR_COLOR,
       'circle-stroke-color': ANCHOR_HALO,
       'circle-stroke-width': 2.5,
@@ -516,10 +574,10 @@ onUnmounted(() => {
        so a min-height here would fight that budget on short viewports. -->
   <div class="relative h-full w-full">
     <div ref="mapContainer" class="h-full w-full overflow-hidden rounded-xl" />
-    <!-- Top-left stack: the corridor request's state, and what the search
-         highlights. The corridor overview loads after the cards; say so on the
+    <!-- Top-left stack: the corridor request's state, and the search in words
+         (every tab — station, city or country). The corridor overview loads after the cards; say so on the
          map itself rather than in the card column, which is already usable. -->
-    <div class="absolute top-3 left-3 flex flex-col items-start gap-2">
+    <div ref="topLeftOverlay" class="absolute top-3 left-3 flex flex-col items-start gap-2">
       <div
         v-if="corridorsStatus === 'loading' || corridorsStatus === 'failed'"
         class="bg-surface-0/90 flex items-center gap-2 rounded-lg px-3 py-2 text-xs shadow-md backdrop-blur-sm"
@@ -541,14 +599,16 @@ onUnmounted(() => {
         </template>
       </div>
       <div
-        v-if="countryLabel"
-        class="bg-surface-0/90 rounded-lg px-3 py-2 text-xs font-semibold text-surface-900 shadow-md backdrop-blur-sm"
+        v-if="searchSummary"
+        class="bg-surface-0/90 flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-surface-900 shadow-md backdrop-blur-sm"
       >
-        {{ countryLabel }}
+        <AppIcon :path="searchSummary.icon" :size="14" class="shrink-0 text-surface-700" />
+        <span>{{ searchSummary.text }}</span>
       </div>
     </div>
     <!-- Without this the "already served" signal reads as an arbitrary palette. -->
     <div
+      ref="legendOverlay"
       class="bg-surface-0/90 absolute bottom-3 left-3 rounded-lg px-3 py-2 text-xs shadow-md backdrop-blur-sm"
     >
       <ul class="space-y-1">
@@ -572,8 +632,8 @@ onUnmounted(() => {
             v-else
             class="inline-block h-3 w-5 shrink-0 rounded-sm border"
             :style="{
-              borderColor: CORRIDOR_COLORS.proposed,
-              backgroundColor: `color-mix(in srgb, ${CORRIDOR_COLORS.proposed} 20%, white)`,
+              borderColor: COUNTRY_COLOR,
+              backgroundColor: `color-mix(in srgb, ${COUNTRY_COLOR} 25%, white)`,
             }"
           />
           <span class="text-surface-700">{{ item.label }}</span>

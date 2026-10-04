@@ -1051,24 +1051,32 @@
   "gallery": {
     "heading": "Bring the night trains back on track!",
     "tabs": {
-      "aToB": "From A to B",
-      "byStation": "By Station",
-      "byCountry": "By Country",
-      "byRelation": "Between Countries"
+      "station": "By station",
+      "city": "By city",
+      "country": "By country"
+    },
+    "kind": {
+      "label": "Search kind",
+      "via": "Via",
+      "fromTo": "From → to",
+      "hint": {
+        "via": "Routes that call at this place.",
+        "fromTo": "Routes that call at both places, in either direction — not only as end points."
+      }
     },
     "search": {
       "from": "From",
-      "fromPlaceholder": "Click to select a station",
       "to": "To",
-      "toPlaceholder": "Click to select a station",
+      "toLower": "to",
       "station": "Station",
       "stationPlaceholder": "Click to select a station",
+      "city": "City",
+      "cityPlaceholder": "Click to select a city",
       "country": "Country",
       "countryPlaceholder": "Click to select a country",
-      "relationFrom": "Between",
-      "relationTo": "and",
       "clear": "Clear {field}",
       "noCountries": "No countries found",
+      "noCities": "No cities found",
       "button": "Search"
     },
     "welcome": {
@@ -1090,7 +1098,11 @@
     "source": {
       "all": "All routes",
       "proposal": "Proposals",
-      "existing": "Existing"
+      "existing": "Existing",
+      "label": "Source"
+    },
+    "show": {
+      "label": "Show"
     },
     "filter": {
       "label": "Whose routes",
@@ -1158,12 +1170,14 @@
         "existing": "Existing",
         "stops": "Stops of the hovered route",
         "anchor": "Searched station",
-        "country": "Selected country"
+        "country": "Selected country",
+        "city": "Searched city"
       },
       "loading": "Loading map…",
       "failed": "The map couldn't be loaded.",
       "highlight": {
-        "relation": "{from} ↔ {to}"
+        "via": "via {place}",
+        "pair": "{from} ↔ {to}"
       }
     },
     "card": {

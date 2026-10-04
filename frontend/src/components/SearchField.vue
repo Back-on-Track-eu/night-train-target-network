@@ -4,7 +4,7 @@ import { mdiClose } from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
 
 // One field of the gallery search bar (From / To / Station / Country / the two
-// relation ends). Always rendered inside a StopSelect or CountrySelect, whose
+// relation ends). Always rendered inside a StopSelect or OptionSelect, whose
 // trigger is the surrounding element — hence the @click.stop on the clear
 // button, which would otherwise open the picker it just cleared.
 //

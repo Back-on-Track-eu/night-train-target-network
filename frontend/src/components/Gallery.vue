@@ -15,10 +15,10 @@ import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
 import {
   mdiAccountOutline,
-  mdiArrowLeftRight,
+  mdiArrowRight,
+  mdiCityVariantOutline,
   mdiMapMarkerOutline,
   mdiEarth,
-  mdiFlagOutline,
   mdiMagnify,
   mdiPlus,
   mdiSortAscending,
@@ -28,7 +28,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
 import LandingIntro from '@/components/LandingIntro.vue'
 import StopSelect from '@/components/StopSelect.vue'
-import CountrySelect from '@/components/CountrySelect.vue'
+import OptionSelect, { type SelectOption } from '@/components/OptionSelect.vue'
 import SearchField from '@/components/SearchField.vue'
 import ProposalCard from '@/components/ProposalCard.vue'
 import GalleryScenarioPanel from '@/components/GalleryScenarioPanel.vue'
@@ -42,7 +42,18 @@ import { createAbortSlot } from '@/lib/apiClient'
 import { ctaButtonClass } from '@/lib/ctaButtonClass'
 import { selectPillPt } from '@/lib/selectPillPt'
 import { asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
-import { buildRelationToken, stopMarkers, type GalleryRowRef } from '@/lib/galleryMap'
+import { stopMarkers, type GalleryRowRef, type GalleryStopMarker } from '@/lib/galleryMap'
+import {
+  SEARCH_KINDS,
+  SEARCH_TABS,
+  activePicks,
+  anchorStopIds,
+  cityOptions,
+  searchFilter,
+  type CityOption,
+  type GallerySearchKind,
+  type GallerySearchTab,
+} from '@/lib/gallerySearch'
 import {
   rangesFromQuery,
   rangesToFilter,
@@ -55,7 +66,6 @@ import {
   seedToQuery,
   seedFromQuery,
   queryString,
-  type GallerySearchMode,
   type GallerySearchSeed,
 } from '@/lib/proposalPrefill'
 import {
@@ -74,7 +84,7 @@ import {
   type DistributionsSection,
 } from '@/types/api'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const store = useStore()
 const { countryName } = useLocaleFormat()
 const route = useRoute()
@@ -91,63 +101,56 @@ const LIMIT = 20
 // showed. It is its own request per query instead — see loadCorridors().
 const PAGE_SECTIONS: ProposalsSection[] = ['summaries', 'map_routes']
 
-const mode = ref<GallerySearchMode>('aToB')
-
-// Search inputs (kept per-mode; buildFilter() only reads the active mode's).
-const fromStop = ref<Stop | null>(null)
-const toStop = ref<Stop | null>(null)
-const stationStop = ref<Stop | null>(null)
-const countryCode = ref<string | null>(null)
-// byRelation's two country selects, in pick order.
-const relationFrom = ref<string | null>(null)
-const relationTo = ref<string | null>(null)
+// The search bar: one TAB (station / city / country), one KIND (via = one
+// place, from → to = two), and the picks per tab — kept for every tab, not
+// only the active one, so switching tabs and back keeps a selection.
+// lib/gallerySearch.ts maps the active tab's picks to the request filter.
+const tab = ref<GallerySearchTab>('station')
+const kind = ref<GallerySearchKind>('via')
+const stopA = ref<Stop | null>(null)
+const stopB = ref<Stop | null>(null)
+const cityA = ref<CityOption | null>(null)
+const cityB = ref<CityOption | null>(null)
+const countryA = ref<string | null>(null)
+const countryB = ref<string | null>(null)
 
 // Current search-bar state, handed to "Suggest a new route" so the new
 // proposal's itinerary can be prefilled from whatever the user was searching
 // for instead of two arbitrary stops.
 const searchSeed = computed<GallerySearchSeed>(() => ({
-  mode: mode.value,
-  fromStop: fromStop.value,
-  toStop: toStop.value,
-  stationStop: stationStop.value,
-  countryCode: countryCode.value,
-  relationFrom: relationFrom.value,
-  relationTo: relationTo.value,
+  tab: tab.value,
+  kind: kind.value,
+  stops: [stopA.value, stopB.value],
+  cities: [cityA.value, cityB.value],
+  countries: [countryA.value, countryB.value],
 }))
 
-// Stops the active search targeted — handed to each card so it can pin the
-// matched stop(s) as itinerary anchors. Empty for by-country search.
-const highlightStopIds = computed(() => {
-  if (mode.value === 'aToB') {
-    return [fromStop.value?.stop_id, toStop.value?.stop_id].filter((id): id is string => !!id)
-  }
-  if (mode.value === 'byStation') {
-    return stationStop.value ? [stationStop.value.stop_id] : []
-  }
-  return []
-})
+// Stops the active search targets — handed to each card so it can pin the
+// matched stop(s) as itinerary anchors, and to the map. A city anchors all
+// its stops. Empty for a country search.
+const highlightStopIds = computed(() => anchorStopIds(searchSeed.value))
 
 // The countries the active search names, in pick order — the map tints their
-// land outline. Empty for the stop-based modes.
-const highlightCountries = computed(() => {
-  if (mode.value === 'byCountry') return countryCode.value ? [countryCode.value] : []
-  if (mode.value === 'byRelation') {
-    return [relationFrom.value, relationTo.value].filter((c): c is string => !!c)
-  }
-  return []
-})
+// land outline. Empty for the stop-based tabs.
+const highlightCountries = computed(() =>
+  tab.value === 'country' ? activePicks(searchSeed.value, (p) => p.countries) : [],
+)
 
 // Sort as a field + direction. These stay the source of truth (the URL sync and
 // the request body are both field+direction); the single Select below drives
 // them through one combined "field:dir" value.
 //
-// Distance-desc is the default because it is the only sortable column BOTH
-// gallery sources carry a real value for — CO₂ savings is NULL on every
-// existing (ONTD) row, so defaulting to it would open the gallery on a page of
-// the handful of evaluated proposals with the whole catalogue sorted behind
-// them by NULLS LAST.
-const sortField = ref<ProposalSortKey>('total_distance_km')
-const sortDir = ref<'asc' | 'desc'>('desc')
+// Newest first is the default (decided 2026-10-04): the gallery opens on
+// proposals, and what a returning reader wants to see is what came in since.
+// Existing (ONTD) rows carry no timestamps, so the sourceFilter watcher below
+// falls back to distance — the one column both sources carry — the moment
+// the list shows existing trains alone.
+const DEFAULT_SORT: { field: ProposalSortKey; dir: 'asc' | 'desc' } = {
+  field: 'created_at',
+  dir: 'desc',
+}
+const sortField = ref<ProposalSortKey>(DEFAULT_SORT.field)
+const sortDir = ref<'asc' | 'desc'>(DEFAULT_SORT.dir)
 
 // The map, which arrives with the list in the SAME response — no per-proposal
 // geometry fetch anywhere.
@@ -191,28 +194,27 @@ let corridorSeq = 0
 const distributionSlot = createAbortSlot()
 let distributionSeq = 0
 
-const tabs = computed(() => [
-  {
-    value: 'aToB' as const,
-    label: t('gallery.tabs.aToB'),
-    icon: mdiArrowLeftRight,
-  },
-  {
-    value: 'byStation' as const,
-    label: t('gallery.tabs.byStation'),
-    icon: mdiMapMarkerOutline,
-  },
-  {
-    value: 'byCountry' as const,
-    label: t('gallery.tabs.byCountry'),
-    icon: mdiEarth,
-  },
-  {
-    value: 'byRelation' as const,
-    label: t('gallery.tabs.byRelation'),
-    icon: mdiFlagOutline,
-  },
-])
+const TAB_ICONS: Record<GallerySearchTab, string> = {
+  station: mdiMapMarkerOutline,
+  city: mdiCityVariantOutline,
+  country: mdiEarth,
+}
+const tabs = computed(() =>
+  SEARCH_TABS.map((value) => ({
+    value,
+    label: t(`gallery.tabs.${value}`),
+    icon: TAB_ICONS[value],
+  })),
+)
+const kinds = computed(() =>
+  SEARCH_KINDS.map((value) => ({ value, label: t(`gallery.kind.${value}`) })),
+)
+const fromTo = computed(() => kind.value === 'fromTo')
+// The field labels: the place noun for "via", From / To for a pair.
+const fieldLabelA = computed(() =>
+  fromTo.value ? t('gallery.search.from') : t(`gallery.search.${tab.value}`),
+)
+const fieldPlaceholder = computed(() => t(`gallery.search.${tab.value}Placeholder`))
 
 // Existing trains alone on screen: neither the scenario (they run as they run
 // today) nor ownership (nobody owns them) applies, so both controls grey out
@@ -325,10 +327,13 @@ const scenarioVariantId = computed<number | null>(() => {
 })
 
 // Which source(s) the list shows. 'all' sends no `sources` key at all, which
-// the backend reads as both.
+// the backend reads as both. Proposals are the default (decided 2026-10-04):
+// they are what the gallery exists to collect; the existing network is the
+// comparison, one click away.
 type SourceChoice = 'all' | ProposalSourceKind
-const sourceFilter = ref<SourceChoice>('all')
+const DEFAULT_SOURCE: SourceChoice = 'proposal'
 const SOURCE_CHOICES: readonly SourceChoice[] = ['all', 'proposal', 'existing']
+const sourceFilter = ref<SourceChoice>(DEFAULT_SOURCE)
 const sourceOptions = computed(() =>
   SOURCE_CHOICES.map((value) => ({
     value,
@@ -432,22 +437,56 @@ watch(
 
 // Country codes present in the loaded stops, resolved to full names in the
 // active locale (unknown codes fall back to the raw code).
-const countryOptions = computed(() =>
+const countryOptions = computed<SelectOption[]>(() =>
   [...new Set(store.stops.map((s) => s.country_code))]
-    .map((code) => ({ code, name: countryName(code) }))
-    .sort((a, b) => a.name.localeCompare(b.name)),
+    .map((code) => ({ key: code, label: countryName(code) }))
+    .sort((a, b) => a.label.localeCompare(b.label)),
 )
-const selectedCountryName = computed(() =>
-  countryCode.value ? countryName(countryCode.value) : null,
+// Cities, grouped from the same store (lib/gallerySearch.ts). The search text
+// carries every catalogue-language name, like StopSelect does, so "Monaco"
+// finds München on the English UI too.
+const cities = computed(() => cityOptions(store.stops, locale.value))
+const cityPickerOptions = computed<SelectOption[]>(() =>
+  cities.value.map((c) => ({
+    key: String(c.osm_id),
+    label: c.name,
+    subtitle: countryName(c.country_code),
+    haystack: [c.name, ...Object.values(c.names), countryName(c.country_code)]
+      .join('\u0000')
+      .toLowerCase(),
+  })),
 )
-const selectedRelationFromName = computed(() =>
-  relationFrom.value ? countryName(relationFrom.value) : null,
-)
-const selectedRelationToName = computed(() =>
-  relationTo.value ? countryName(relationTo.value) : null,
-)
-// The stored "AT__DE" token, or null while the pair is incomplete or identical.
-const relationToken = computed(() => buildRelationToken(relationFrom.value, relationTo.value))
+const cityById = (key: string): CityOption | null =>
+  cities.value.find((c) => String(c.osm_id) === key) ?? null
+
+// What each field shows, and what the chip on the map repeats.
+const pickLabel = (slot: 0 | 1): string | null => {
+  if (tab.value === 'station') return [stopA, stopB][slot].value?.name ?? null
+  if (tab.value === 'city') return [cityA, cityB][slot].value?.name ?? null
+  const code = [countryA, countryB][slot].value
+  return code ? countryName(code) : null
+}
+const labelA = computed(() => pickLabel(0))
+const labelB = computed(() => pickLabel(1))
+// The map's top-left chip: the tab's icon and the search in words, for every
+// tab. A pair is joined with ↔, not the switch's →: the filter is both places
+// touched in either direction, and the chip states the filter, not the UI.
+const searchSummary = computed(() => {
+  const a = labelA.value
+  const b = fromTo.value ? labelB.value : null
+  const place = a ?? b
+  if (!place) return null
+  const text =
+    a && b
+      ? t('gallery.map.highlight.pair', { from: a, to: b })
+      : t('gallery.map.highlight.via', { place })
+  return { icon: TAB_ICONS[tab.value], text }
+})
+function clearPick(slot: 0 | 1): void {
+  if (tab.value === 'station') [stopA, stopB][slot].value = null
+  else if (tab.value === 'city') [cityA, cityB][slot].value = null
+  else [countryA, countryB][slot].value = null
+}
 
 const currentSort = computed<ProposalSort>(() => ({
   by: sortField.value,
@@ -456,13 +495,8 @@ const currentSort = computed<ProposalSort>(() => ({
 
 const reachedEnd = computed(() => initialized.value && proposals.value.length >= total.value)
 
-// Map the active search mode + inputs to a backend filter.
-//
-// "From A to B" with both fields filled asks for containment (mode 'all'), so a
-// result must touch BOTH stops rather than either — the array filters default to
-// overlap ('any'), which used to make this an approximation. It is still not a
-// strict A→B connection: the backend has no ordering predicate, so a route
-// serving B before A matches too.
+// Map the search bar + switches to a backend filter. The search bar's part
+// lives in lib/gallerySearch.ts (searchFilter), where it is tested.
 function buildFilter(): ProposalsFilter | undefined {
   const base: ProposalsFilter = {}
   // Omitting `sources` means BOTH on the backend, so only send it when the
@@ -480,22 +514,7 @@ function buildFilter(): ProposalsFilter | undefined {
   }
 
   Object.assign(base, rangesToFilter(ranges.value))
-
-  if (mode.value === 'aToB') {
-    const ids = [fromStop.value?.stop_id, toStop.value?.stop_id].filter((id): id is string =>
-      Boolean(id),
-    )
-    // One stop filled is a by-station search in disguise — 'all' over a single
-    // value is the same query as 'any', so send the plain list.
-    if (ids.length > 1) base.stop_ids = { values: ids, mode: 'all' }
-    else if (ids.length) base.stop_ids = ids
-  } else if (mode.value === 'byStation') {
-    if (stationStop.value) base.stop_ids = [stationStop.value.stop_id]
-  } else if (mode.value === 'byRelation') {
-    if (relationToken.value) base.country_relations = [relationToken.value]
-  } else if (countryCode.value) {
-    base.countries = [countryCode.value]
-  }
+  Object.assign(base, searchFilter(searchSeed.value))
 
   return Object.keys(base).length ? base : undefined
 }
@@ -670,7 +689,21 @@ const hoveredSummary = computed(() => {
 const hoveredStops = computed(() =>
   stopMarkers(hoveredSummary.value?.stop_ids ?? [], stopsById.value),
 )
-const anchorStops = computed(() => stopMarkers(highlightStopIds.value, stopsById.value))
+// What the map pins: the searched station(s), or one pin per searched city at
+// its centroid (its stops keep their own dots on hover, which is why the city
+// marker carries no stop id a dot could be suppressed by).
+const anchorStops = computed<GalleryStopMarker[]>(() => {
+  if (tab.value === 'city') {
+    return activePicks(searchSeed.value, (p) => p.cities).map((c) => ({
+      stop_id: `city:${c.osm_id}`,
+      name: c.name,
+      lon: c.lon,
+      lat: c.lat,
+      city: true,
+    }))
+  }
+  return stopMarkers(highlightStopIds.value, stopsById.value)
+})
 
 // LandingIntro's secondary call to action. The target lives here rather than in
 // the intro because the intro has no business knowing what follows it.
@@ -743,6 +776,9 @@ function currentSearchQuery(): LocationQueryRaw {
   // Only when on: an absent key is the default, and a shared link should not
   // carry a filter that resolves against whoever opens it.
   if (mineOnly.value) query.mine = '1'
+  // Only off the default, so links stay short and an old link keeps meaning
+  // "proposals".
+  if (sourceFilter.value !== DEFAULT_SOURCE) query.src = sourceFilter.value
   Object.assign(query, rangesToQuery(ranges.value))
   // The SCENARIO, not the variant: the variant ids are materialised and can
   // be rebuilt, the scenario is what a shared link should still mean.
@@ -754,13 +790,14 @@ function currentSearchQuery(): LocationQueryRaw {
 
 watch(
   [
-    mode,
-    fromStop,
-    toStop,
-    stationStop,
-    countryCode,
-    relationFrom,
-    relationTo,
+    tab,
+    kind,
+    stopA,
+    stopB,
+    cityA,
+    cityB,
+    countryA,
+    countryB,
     sourceFilter,
     mineOnly,
     ranges,
@@ -859,28 +896,35 @@ onMounted(async () => {
   // URL before the first query fires is what makes a shared or reloaded
   // /gallery?... link reproduce the exact same results.
   const stopsLoading = store.stopsStatus === 'success' ? null : store.fetchStops()
-  const hasStopParams = ['from', 'to', 'station'].some((k) => queryString(route.query[k]))
-  if (hasStopParams && stopsLoading) await stopsLoading
+  const linkTab = queryString(route.query.tab) ?? queryString(route.query.mode)
+  const namesStop =
+    ['a', 'b', 'from', 'to', 'station'].some((k) => queryString(route.query[k])) &&
+    linkTab !== 'country' &&
+    linkTab !== 'byCountry' &&
+    linkTab !== 'byRelation'
+  if (namesStop && stopsLoading) await stopsLoading
   // Same for a scenario in the link: it can only be resolved against the
   // loaded scenarios, and resolving it after the first load would mean a
   // second one.
   if (queryString(route.query.scenario) && store.scenariosStatus !== 'success') {
     await store.fetchScenarios()
   }
-  const seed = seedFromQuery(route.query, store.stops)
-  mode.value = seed.mode
-  fromStop.value = seed.fromStop
-  toStop.value = seed.toStop
-  stationStop.value = seed.stationStop
-  countryCode.value = seed.countryCode
-  relationFrom.value = seed.relationFrom
-  relationTo.value = seed.relationTo
+  const seed = seedFromQuery(route.query, store.stops, cities.value)
+  tab.value = seed.tab
+  kind.value = seed.kind
+  ;[stopA.value, stopB.value] = seed.stops
+  ;[cityA.value, cityB.value] = seed.cities
+  ;[countryA.value, countryB.value] = seed.countries
   const sortParam = queryString(route.query.sort)
   if (sortParam && (PROPOSAL_SORT_KEYS as readonly string[]).includes(sortParam)) {
     sortField.value = sortParam as ProposalSortKey
   }
   const dirParam = queryString(route.query.dir)
   if (dirParam === 'asc' || dirParam === 'desc') sortDir.value = dirParam
+  const srcParam = queryString(route.query.src)
+  if (srcParam && (SOURCE_CHOICES as readonly string[]).includes(srcParam)) {
+    sourceFilter.value = srcParam as SourceChoice
+  }
   // Resolves against whoever is signed in now — the account is deliberately
   // not part of the link.
   mineOnly.value = queryString(route.query.mine) === '1' && canFilterMine.value
@@ -995,120 +1039,112 @@ onActivated(() => {
          stacking context of their own, so neither the intro above nor the
          sticky map column beside them can paint over the controls. -->
     <div class="relative z-10 flex flex-col items-center gap-3">
-      <!-- Category tabs: one hairline-divided pill from sm up. Four labels
-           side by side are wider than a phone, so below sm they sit in a
-           2×2 grid without the dividers (a divider between wrapped rows
-           would join the wrong neighbours). A label never wraps: "Between
-           Countries" on two lines left its icon alone on the first. -->
+      <!-- Place tabs: one hairline-divided pill from sm up, a row of three
+           below it too (three short labels fit a phone). A label never wraps. -->
       <div
-        class="grid w-full grid-cols-2 sm:flex sm:w-auto sm:divide-x sm:divide-primary-50/20 sm:overflow-hidden sm:rounded-full"
+        class="flex w-full justify-center divide-x divide-primary-50/20 overflow-hidden rounded-full sm:w-auto"
       >
         <button
-          v-for="tab in tabs"
-          :key="tab.value"
+          v-for="item in tabs"
+          :key="item.value"
           type="button"
           class="flex cursor-pointer items-center justify-center gap-1.5 px-2 py-2 text-sm leading-none whitespace-nowrap transition sm:px-4"
           :class="
-            mode === tab.value
+            tab === item.value
               ? 'text-primary-50 font-bold'
               : 'text-primary-50/60 hover:text-primary-50/100'
           "
-          @click="mode = tab.value"
+          @click="tab = item.value"
         >
-          <AppIcon :path="tab.icon" :size="16" />
-          {{ tab.label }}
+          <AppIcon :path="item.icon" :size="16" />
+          {{ item.label }}
         </button>
       </div>
 
-      <!-- Input pill — adapts to the active mode. A row from sm up; on a phone
-           the fields stack full-width (SearchField drops its fixed width
-           there, and items-stretch is what hands it the pill's width), the
-           divider turns into a rule between them and the search button
-           becomes a labelled full-width row rather than an icon on its own. -->
+      <!-- Input pill — the kind switch, then one field or two. A row from sm
+           up; on a phone the fields stack full-width (SearchField drops its
+           fixed width there, and items-stretch is what hands it the pill's
+           width), the divider turns into a rule between them and the search
+           button becomes a labelled full-width row rather than an icon on its
+           own. -->
       <div
-        class="flex w-full flex-col items-stretch gap-1 rounded-3xl border border-primary-50/20 bg-primary-50/5 p-1.5 shadow-lg sm:w-auto sm:flex-row sm:items-center sm:rounded-full sm:py-1.5 sm:pl-2 sm:pr-1.5"
+        class="flex w-full flex-col items-stretch gap-1 rounded-3xl border border-primary-50/20 bg-primary-50/5 p-1.5 shadow-lg sm:w-auto sm:flex-row sm:items-center sm:rounded-full sm:py-1.5 sm:pl-1.5 sm:pr-1.5"
       >
-        <!-- From A to B: two stop inputs -->
-        <template v-if="mode === 'aToB'">
+        <!-- Via (one place) or from → to (two). The same switch on every tab,
+             so the four old tabs collapse into three places × two kinds. -->
+        <div
+          class="flex shrink-0 self-start rounded-full border border-primary-50/20 p-0.5 sm:self-auto"
+          role="group"
+          :aria-label="t('gallery.kind.label')"
+        >
+          <button
+            v-for="item in kinds"
+            :key="item.value"
+            type="button"
+            class="flex cursor-pointer items-center gap-1 rounded-full px-3 py-1.5 text-sm leading-none whitespace-nowrap transition"
+            :class="
+              kind === item.value
+                ? 'bg-primary-50/10 font-bold text-primary-50'
+                : 'text-primary-50/60 hover:text-primary-50'
+            "
+            :aria-pressed="kind === item.value"
+            @click="kind = item.value"
+          >
+            <template v-if="item.value === 'fromTo'">
+              {{ t('gallery.search.from') }}
+              <AppIcon :path="mdiArrowRight" :size="14" />
+              {{ t('gallery.search.toLower') }}
+            </template>
+            <template v-else>{{ item.label }}</template>
+          </button>
+        </div>
+
+        <!-- Field A, and field B for a pair. The picker follows the tab; the
+             SearchField inside is the same for all three. -->
+        <template v-for="slot in fromTo ? [0, 1] : [0]" :key="slot">
+          <div v-if="slot === 1" class="h-px w-full bg-primary-50/15 sm:h-8 sm:w-px"></div>
           <StopSelect
+            v-if="tab === 'station'"
             :stops="store.stops"
             :status="store.stopsStatus"
-            @select="fromStop = $event"
+            @select="slot === 0 ? (stopA = $event) : (stopB = $event)"
             @retry="store.fetchStops()"
           >
             <SearchField
-              :label="t('gallery.search.from')"
-              :value="fromStop?.name ?? null"
-              :placeholder="t('gallery.search.fromPlaceholder')"
-              @clear="fromStop = null"
+              :label="slot === 0 ? fieldLabelA : t('gallery.search.to')"
+              :value="slot === 0 ? labelA : labelB"
+              :placeholder="fieldPlaceholder"
+              @clear="clearPick(slot as 0 | 1)"
             />
           </StopSelect>
-          <div class="h-px w-full bg-primary-50/15 sm:h-8 sm:w-px"></div>
-          <StopSelect
-            :stops="store.stops"
-            :status="store.stopsStatus"
-            @select="toStop = $event"
-            @retry="store.fetchStops()"
+          <OptionSelect
+            v-else-if="tab === 'city'"
+            :options="cityPickerOptions"
+            :placeholder="fieldPlaceholder"
+            :empty-text="t('gallery.search.noCities')"
+            @select="slot === 0 ? (cityA = cityById($event)) : (cityB = cityById($event))"
           >
             <SearchField
-              :label="t('gallery.search.to')"
-              :value="toStop?.name ?? null"
-              :placeholder="t('gallery.search.toPlaceholder')"
-              @clear="toStop = null"
+              :label="slot === 0 ? fieldLabelA : t('gallery.search.to')"
+              :value="slot === 0 ? labelA : labelB"
+              :placeholder="fieldPlaceholder"
+              @clear="clearPick(slot as 0 | 1)"
             />
-          </StopSelect>
-        </template>
-
-        <!-- By Station: one stop input -->
-        <template v-else-if="mode === 'byStation'">
-          <StopSelect
-            :stops="store.stops"
-            :status="store.stopsStatus"
-            @select="stationStop = $event"
-            @retry="store.fetchStops()"
+          </OptionSelect>
+          <OptionSelect
+            v-else
+            :options="countryOptions"
+            :placeholder="fieldPlaceholder"
+            :empty-text="t('gallery.search.noCountries')"
+            @select="slot === 0 ? (countryA = $event) : (countryB = $event)"
           >
             <SearchField
-              :label="t('gallery.search.station')"
-              :value="stationStop?.name ?? null"
-              :placeholder="t('gallery.search.stationPlaceholder')"
-              @clear="stationStop = null"
+              :label="slot === 0 ? fieldLabelA : t('gallery.search.to')"
+              :value="slot === 0 ? labelA : labelB"
+              :placeholder="fieldPlaceholder"
+              @clear="clearPick(slot as 0 | 1)"
             />
-          </StopSelect>
-        </template>
-
-        <!-- By Country: same picker style as the stop selection -->
-        <template v-else-if="mode === 'byCountry'">
-          <CountrySelect :countries="countryOptions" @select="countryCode = $event">
-            <SearchField
-              :label="t('gallery.search.country')"
-              :value="selectedCountryName"
-              :placeholder="t('gallery.search.countryPlaceholder')"
-              @clear="countryCode = null"
-            />
-          </CountrySelect>
-        </template>
-
-        <!-- By Relation: a country PAIR. The stored token is alphabetical and
-             direction-agnostic, so these two are interchangeable — picking
-             AT/DE and DE/AT runs the same query. -->
-        <template v-else>
-          <CountrySelect :countries="countryOptions" @select="relationFrom = $event">
-            <SearchField
-              :label="t('gallery.search.relationFrom')"
-              :value="selectedRelationFromName"
-              :placeholder="t('gallery.search.countryPlaceholder')"
-              @clear="relationFrom = null"
-            />
-          </CountrySelect>
-          <div class="h-px w-full bg-primary-50/15 sm:h-8 sm:w-px"></div>
-          <CountrySelect :countries="countryOptions" @select="relationTo = $event">
-            <SearchField
-              :label="t('gallery.search.relationTo')"
-              :value="selectedRelationToName"
-              :placeholder="t('gallery.search.countryPlaceholder')"
-              @clear="relationTo = null"
-            />
-          </CountrySelect>
+          </OptionSelect>
         </template>
 
         <!-- Search button. The label is spoken on every screen and shown only
@@ -1122,6 +1158,85 @@ onActivated(() => {
         >
           <AppIcon :path="mdiMagnify" :size="20" />
           <span class="sm:sr-only">{{ t('gallery.search.button') }}</span>
+        </button>
+      </div>
+      <!-- What the kind means, in one line — "from → to" is both places touched,
+           in either direction, which a reader would otherwise take for end
+           points. -->
+      <p class="px-4 text-center text-xs text-primary-50/50">
+        {{ t(`gallery.kind.hint.${kind}`) }}
+      </p>
+    </div>
+
+    <!-- What to show: the source switch and the ownership switch, up here
+         with the other things that narrow the list (the search above, the
+         ranges and the scenario below) rather than at the head of the result
+         column, which now only sorts and counts (decided 2026-10-04). Source
+         is a segmented switch like ownership: three short labels need no
+         dropdown. -->
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-sm">
+      <span class="text-primary-50/60">{{ t('gallery.show.label') }}</span>
+      <!-- Suggested routes and the existing ONTD network are two different
+           kinds of thing sharing one list; this separates them, and narrows
+           the sort fields to the ones ONTD rows actually carry. -->
+      <div
+        class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5"
+        role="group"
+        :aria-label="t('gallery.source.label')"
+      >
+        <button
+          v-for="option in sourceOptions"
+          :key="option.value"
+          type="button"
+          class="cursor-pointer rounded-full px-3 py-1 whitespace-nowrap transition"
+          :class="sourceFilter === option.value ? activeOwnerClass : inactiveOwnerClass"
+          :aria-pressed="sourceFilter === option.value"
+          @click="sourceFilter = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+      <!-- Whose routes. Always on screen, whatever the source switch or the
+           sign-in state says: hiding it for signed-out readers made it a
+           control nobody could find. Greyed, not hidden, while existing trains
+           alone are listed: nobody owns an ONTD row, and a switch that vanished
+           with the source would be a switch nobody could find again. Picking
+           "mine" while the list shows existing trains alone moves the source
+           switch with it. -->
+      <div
+        class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5 transition-opacity"
+        :class="existingOnly ? 'opacity-40' : ''"
+        role="group"
+        :aria-label="t('gallery.filter.label')"
+        :aria-disabled="existingOnly"
+        :title="existingOnly ? t('gallery.filter.disabledHint') : undefined"
+      >
+        <button
+          type="button"
+          class="rounded-full px-3 py-1 transition"
+          :class="[
+            mineOnly ? inactiveOwnerClass : activeOwnerClass,
+            existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
+          ]"
+          :aria-pressed="!mineOnly"
+          :disabled="existingOnly"
+          @click="mineOnly = false"
+        >
+          {{ t('gallery.filter.all') }}
+        </button>
+        <button
+          type="button"
+          class="flex items-center gap-1.5 rounded-full px-3 py-1 transition"
+          :class="[
+            mineOnly ? activeOwnerClass : inactiveOwnerClass,
+            existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
+          ]"
+          :aria-pressed="mineOnly"
+          :disabled="existingOnly"
+          @click="selectMine"
+        >
+          <AppIcon :path="mdiAccountOutline" :size="16" />
+          {{ t('gallery.filter.mine') }}
         </button>
       </div>
     </div>
@@ -1166,20 +1281,27 @@ onActivated(() => {
       :style="{ '--row-height': rowHeight }"
     >
       <div class="flex w-full flex-col gap-3 lg:h-full lg:w-96 lg:shrink-0">
-        <!-- Source + sort, at the head of the column whose order they set —
-             which also puts the map's top edge level with them. -->
-        <div class="flex items-center justify-between gap-2">
-          <!-- Source switch. Suggested routes and the existing ONTD network are
-               two different kinds of thing sharing one list; this separates them,
-               and narrows the sort fields to the ones ONTD rows actually carry. -->
-          <Select
-            v-model="sourceFilter"
-            :options="sourceOptions"
-            option-value="value"
-            option-label="label"
-            :unstyled="true"
-            :pt="selectPillPt"
-          />
+        <!-- How many the search matched (left) and the sort (right), at the
+             head of the column whose order it sets — which also puts the
+             map's top edge level with it. The loading state lives up here,
+             where the eye is, not at the foot of a list that may be scrolled
+             out of view: a spinner and a word while any page is in flight,
+             the count otherwise. The count appears once the first query has
+             come back and then stays put across later searches — see
+             shownTotal. -->
+        <div class="flex min-h-8 items-center justify-between gap-2">
+          <span
+            v-if="loading"
+            class="flex items-center gap-1.5 text-sm text-primary-50/60"
+            role="status"
+          >
+            <AppSpinner :size="14" />
+            {{ t('gallery.loading') }}
+          </span>
+          <p v-else-if="shownTotal !== null && !failure" class="text-sm text-primary-50/50">
+            {{ t('gallery.matching', shownTotal) }}
+          </p>
+          <span v-else></span>
           <!-- Field and direction as ONE control: the field in words, the
                direction as an mdi sort glyph. -->
           <Select
@@ -1208,74 +1330,6 @@ onActivated(() => {
               </span>
             </template>
           </Select>
-        </div>
-
-        <!-- Whose routes (left) and how many the search matched (right). The
-             ownership switch is always on screen, whatever the source switch or
-             the sign-in state says: hiding it for signed-out readers made it a
-             control nobody could find. Picking "mine" while the list is showing
-             existing trains alone moves the source switch with it, since an
-             ONTD row has no owner. The count appears once the first query has
-             come back and then stays put across later searches — see
-             shownTotal. -->
-        <div class="flex min-h-8 items-center justify-between gap-2">
-          <!-- The ownership switch; the range filters live in the distribution
-               panel above the map. -->
-          <div class="flex flex-wrap items-center gap-2">
-            <!-- Greyed, not hidden, while existing trains alone are listed:
-               nobody owns an ONTD row, and a switch that vanished with the
-               source would be a switch nobody could find again. -->
-            <div
-              class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5 text-sm transition-opacity"
-              :class="existingOnly ? 'opacity-40' : ''"
-              role="group"
-              :aria-label="t('gallery.filter.label')"
-              :aria-disabled="existingOnly"
-              :title="existingOnly ? t('gallery.filter.disabledHint') : undefined"
-            >
-              <button
-                type="button"
-                class="rounded-full px-3 py-1 transition"
-                :class="[
-                  mineOnly ? inactiveOwnerClass : activeOwnerClass,
-                  existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
-                ]"
-                :aria-pressed="!mineOnly"
-                :disabled="existingOnly"
-                @click="mineOnly = false"
-              >
-                {{ t('gallery.filter.all') }}
-              </button>
-              <button
-                type="button"
-                class="flex items-center gap-1.5 rounded-full px-3 py-1 transition"
-                :class="[
-                  mineOnly ? activeOwnerClass : inactiveOwnerClass,
-                  existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
-                ]"
-                :aria-pressed="mineOnly"
-                :disabled="existingOnly"
-                @click="selectMine"
-              >
-                <AppIcon :path="mdiAccountOutline" :size="16" />
-                {{ t('gallery.filter.mine') }}
-              </button>
-            </div>
-          </div>
-          <!-- Loading state lives up here, where the eye is, not at the foot of
-               a list that may be scrolled out of view: a spinner and a word
-               while any page is in flight, the count otherwise. -->
-          <span
-            v-if="loading"
-            class="flex items-center gap-1.5 text-sm text-primary-50/60"
-            role="status"
-          >
-            <AppSpinner :size="14" />
-            {{ t('gallery.loading') }}
-          </span>
-          <p v-else-if="shownTotal !== null && !failure" class="text-sm text-primary-50/50">
-            {{ t('gallery.matching', shownTotal) }}
-          </p>
         </div>
 
         <!-- Failures land here, in the column the user is reading, rather than
@@ -1356,6 +1410,7 @@ onActivated(() => {
           :highlighted-stops="hoveredStops"
           :anchor-stops="anchorStops"
           :highlighted-countries="highlightCountries"
+          :search-summary="searchSummary"
           @retry-corridors="loadCorridors"
         />
       </div>

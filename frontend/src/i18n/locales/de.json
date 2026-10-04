@@ -1051,24 +1051,32 @@
   "gallery": {
     "heading": "Bringen wir die Nachtzüge zurück aufs Gleis!",
     "tabs": {
-      "aToB": "Von A nach B",
-      "byStation": "Nach Bahnhof",
-      "byCountry": "Nach Land",
-      "byRelation": "Zwischen Ländern"
+      "station": "Nach Bahnhof",
+      "city": "Nach Stadt",
+      "country": "Nach Land"
+    },
+    "kind": {
+      "label": "Suchart",
+      "via": "Über",
+      "fromTo": "Von → nach",
+      "hint": {
+        "via": "Strecken, die an diesem Ort halten.",
+        "fromTo": "Strecken, die an beiden Orten halten – in beliebiger Richtung, nicht nur als Endpunkte."
+      }
     },
     "search": {
       "from": "Von",
-      "fromPlaceholder": "Zum Auswählen eines Bahnhofs klicken",
       "to": "Nach",
-      "toPlaceholder": "Zum Auswählen eines Bahnhofs klicken",
+      "toLower": "nach",
       "station": "Bahnhof",
       "stationPlaceholder": "Zum Auswählen eines Bahnhofs klicken",
+      "city": "Stadt",
+      "cityPlaceholder": "Zum Auswählen einer Stadt klicken",
       "country": "Land",
       "countryPlaceholder": "Zum Auswählen eines Landes klicken",
-      "relationFrom": "Zwischen",
-      "relationTo": "und",
       "clear": "{field} zurücksetzen",
       "noCountries": "Keine Länder gefunden",
+      "noCities": "Keine Städte gefunden",
       "button": "Suchen"
     },
     "welcome": {
@@ -1090,7 +1098,11 @@
     "source": {
       "all": "Alle Strecken",
       "proposal": "Vorschläge",
-      "existing": "Bestehend"
+      "existing": "Bestehend",
+      "label": "Quelle"
+    },
+    "show": {
+      "label": "Anzeigen"
     },
     "filter": {
       "label": "Wessen Strecken",
@@ -1158,12 +1170,14 @@
         "existing": "Bestehend",
         "stops": "Halte der markierten Strecke",
         "anchor": "Gesuchter Bahnhof",
-        "country": "Gewähltes Land"
+        "country": "Gewähltes Land",
+        "city": "Gesuchte Stadt"
       },
       "loading": "Karte wird geladen…",
       "failed": "Die Karte konnte nicht geladen werden.",
       "highlight": {
-        "relation": "{from} ↔ {to}"
+        "via": "über {place}",
+        "pair": "{from} ↔ {to}"
       }
     },
     "card": {

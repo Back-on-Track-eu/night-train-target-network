@@ -1316,6 +1316,7 @@ export interface ProposalSort {
  *  array-overlap ("any", the default); the object form asks for containment
  *  ("all" — the row must carry every value). */
 export type ProposalsArrayFilter = string[] | { values: string[]; mode: 'any' | 'all' }
+export type ProposalsCitiesFilter = number[] | { values: number[]; mode: 'any' | 'all' }
 
 /** A closed or half-open numeric range — the backend's `{"min", "max"}`
  *  shape for every RANGE_COLUMNS entry (filter_builder.py). Either bound may
@@ -1346,6 +1347,12 @@ export interface ProposalsFilter {
    *  shared column: both sources carry it, so filtering on it keeps existing
    *  trains in the results. */
   country_relations?: ProposalsArrayFilter
+  /** Cities a row calls at, as the OSM place-node ids of `StopCity.osm_id`
+   *  (backend 0.5.15). Not a column: the backend resolves a row's stop_ids
+   *  through the stop catalogue. Same any/all shape as the arrays — 'all'
+   *  is "calls at every one of these cities", which no stop_ids filter can
+   *  say because a city has several stops. */
+  cities?: ProposalsCitiesFilter
   /** Which UNION branch(es) the gallery is built from: 'proposal' =
    *  proposals.proposal_summaries, 'existing' = the ONTD catalog's
    *  ontd.route_summaries (see adapters/proposal/filter_builder.py,
