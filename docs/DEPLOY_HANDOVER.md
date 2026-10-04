@@ -1749,6 +1749,19 @@ the task runner in the background, so `admin.schema_migrations` and
 
 ---
 
+## 25. Docs site: launch report + September product update — frontend image rebuild only (2026-10-04)
+
+Two new documentation pages (`/docs/reports/2026-10-launch`,
+`/docs/updates/2026-09`), a new sidebar group and the renamed _Costs &
+revenues_ group. Static content built into the frontend image like every
+other docs change, plus one app change in the same image (/gallery opens
+scrolled to the gallery when linked with a filter or `#gallery`); no
+backend, schema, data task or environment change.
+The report's figures come from a pgAdmin export run by hand
+(`backend/scripts/sql/crowdsourcing_report_export_pgadmin.sql`, read-only)
+and are committed as JSON, so nothing runs on the server. The member mail
+links to `/docs/reports/2026-10-launch` — deploy before it goes out.
+
 ## 24b. Gallery `cities` filter — backend 0.5.15, no migration (2026-10-04)
 
 `POST /api/proposals` gains the `cities` filter (OSM place-node ids,
