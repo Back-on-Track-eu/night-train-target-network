@@ -7,14 +7,21 @@ import {
   corridorWidthExpression,
   featureBounds,
   routeForRow,
+  routeStopsCollection,
+  anchorCollection,
+  selectedCountriesCollection,
+  stopMarkers,
   CORRIDOR_KINDS,
   CORRIDOR_WIDTH_STOPS,
+  type CountryShapesCollection,
+  type GalleryStopMarker,
 } from './galleryMap'
 import type {
   MapCorridorFeature,
   MapCorridorProperties,
   MapLinesSection,
   MapRouteFeature,
+  Stop,
 } from '@/types/api'
 
 describe('buildRelationToken', () => {
@@ -264,5 +271,111 @@ describe('featureBounds', () => {
         ]),
       ]),
     ).toEqual([1, 2, 3, 4])
+  })
+})
+
+// --- Stops, pins and countries ------------------------------------------------
+
+const stop = (stop_id: string, name: string, lon: number, lat: number): Stop =>
+  ({ stop_id, name, lon, lat }) as Stop
+
+const stopsById = new Map(
+  [
+    stop('DE:BER', 'Berlin Hbf', 13.37, 52.52),
+    stop('DE:FRA', 'Frankfurt (Main) Hbf', 8.66, 50.11),
+    stop('FR:PAR', 'Paris Est', 2.36, 48.88),
+  ].map((s) => [s.stop_id, s]),
+)
+
+describe('stopMarkers', () => {
+  test('keeps travel order and skips ids the catalogue no longer carries', () => {
+    const markers = stopMarkers(['FR:PAR', 'XX:GONE', 'DE:FRA', 'DE:BER'], stopsById)
+    expect(markers.map((m) => m.stop_id)).toEqual(['FR:PAR', 'DE:FRA', 'DE:BER'])
+    expect(markers[0]).toEqual({ stop_id: 'FR:PAR', name: 'Paris Est', lon: 2.36, lat: 48.88 })
+  })
+
+  test('is empty while the store is empty', () => {
+    expect(stopMarkers(['DE:BER'], new Map())).toEqual([])
+  })
+})
+
+const markers: GalleryStopMarker[] = stopMarkers(['DE:BER', 'DE:FRA', 'FR:PAR'], stopsById)
+
+describe('routeStopsCollection', () => {
+  test('flags origin and terminus as endpoints and carries the source', () => {
+    const fc = routeStopsCollection(markers, 'existing')
+    expect(fc.features.map((f) => f.properties.endpoint)).toEqual([true, false, true])
+    expect(fc.features.every((f) => f.properties.source === 'existing')).toBe(true)
+    expect(fc.features[1].geometry).toEqual({ type: 'Point', coordinates: [8.66, 50.11] })
+  })
+
+  // The searched station carries a pin already; a dot underneath would blur it.
+  test('leaves out the stops that are pinned', () => {
+    const fc = routeStopsCollection(markers, 'proposal', new Set(['DE:FRA']))
+    expect(fc.features.map((f) => f.properties.stop_id)).toEqual(['DE:BER', 'FR:PAR'])
+  })
+
+  test('a single stop is its own endpoint', () => {
+    expect(
+      routeStopsCollection(markers.slice(0, 1), 'proposal').features[0].properties.endpoint,
+    ).toBe(true)
+  })
+})
+
+describe('anchorCollection', () => {
+  test('one point per searched station, named', () => {
+    const fc = anchorCollection(markers.slice(1, 2))
+    expect(fc.features).toHaveLength(1)
+    expect(fc.features[0].properties).toEqual({ stop_id: 'DE:FRA', name: 'Frankfurt (Main) Hbf' })
+  })
+})
+
+const shapes: CountryShapesCollection = {
+  type: 'FeatureCollection',
+  features: ['AT', 'DE'].map((country) => ({
+    type: 'Feature',
+    properties: { country },
+    geometry: {
+      type: 'MultiPolygon',
+      coordinates: [
+        [
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 0],
+          ],
+        ],
+      ],
+    },
+  })),
+}
+
+describe('selectedCountriesCollection', () => {
+  test('ranks the picks in order, so the second of a pair draws lighter', () => {
+    const fc = selectedCountriesCollection(shapes, ['DE', 'AT'])
+    expect(fc.features.map((f) => f.properties)).toEqual([
+      { country: 'DE', rank: 0 },
+      { country: 'AT', rank: 1 },
+    ])
+  })
+
+  test('tolerates lower-case codes and drops codes without a shape', () => {
+    const fc = selectedCountriesCollection(shapes, ['de', 'UNK'])
+    expect(fc.features.map((f) => f.properties.country)).toEqual(['DE'])
+  })
+
+  test('is empty before the shapes have loaded', () => {
+    expect(selectedCountriesCollection(null, ['DE']).features).toEqual([])
+  })
+})
+
+describe('featureBounds over mixed grains', () => {
+  test('frames points and polygons together with lines', () => {
+    const bounds = featureBounds([
+      ...anchorCollection(markers.slice(0, 1)).features,
+      ...selectedCountriesCollection(shapes, ['AT']).features,
+    ])
+    expect(bounds).toEqual([0, 0, 13.37, 52.52])
   })
 })
