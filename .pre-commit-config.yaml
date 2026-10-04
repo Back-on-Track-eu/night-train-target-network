@@ -26,7 +26,7 @@ repos:
         # .prettierignore does NOT cover this: pre-commit runs prettier from
         # the repo root, where that file is not consulted — hence an explicit
         # exclude here as well.
-        exclude: ^docs-site/(cost|reference)/|^docs-site/\.vitepress/generated-sidebar\.json$
+        exclude: ^docs-site/(cost|reference|reports/data)/|^docs-site/\.vitepress/generated-sidebar\.json$
         types_or: [javascript, jsx, ts, tsx, vue, json, css, markdown]
         additional_dependencies:
           - prettier@3.5.3

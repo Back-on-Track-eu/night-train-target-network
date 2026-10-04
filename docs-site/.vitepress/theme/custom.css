@@ -292,3 +292,108 @@
   background-color: var(--bot-sapphire-100) !important;
   border-top: 1px solid var(--bot-hairline);
 }
+
+/* --- Report and update pages ----------------------------------------------
+ * pageClass in the page's frontmatter lands on .VPDoc. The launch report's
+ * cards want more room than the 688px reading column (aside: false there
+ * lifts VitePress's own cap); the update page keeps the column and the
+ * outline. Both components' own styles live with the components.
+ * ------------------------------------------------------------------------- */
+.report-page .content-container {
+  max-width: 960px;
+}
+
+/* The report is read like a magazine page, not a manual: links keep the
+   brand colour and lose the underline (decided 2026-10-04). */
+.report-page .vp-doc a {
+  text-decoration: none;
+}
+
+.report-page .vp-doc a:hover {
+  color: var(--vp-c-brand-2);
+}
+
+.vp-doc .report-hero {
+  padding: 24px 0 16px;
+}
+
+.vp-doc .report-hero h1 {
+  margin: 8px 0 18px;
+  font-size: clamp(34px, 5vw, 56px);
+  line-height: 1.05;
+}
+
+.vp-doc .report-hero .report-lede,
+.vp-doc .update-lede {
+  max-width: 640px;
+  color: var(--bot-ink-70);
+  font-size: 18px;
+}
+
+.vp-doc .report-narrow {
+  max-width: 560px;
+}
+
+.vp-doc .report-fine {
+  max-width: 640px;
+  color: var(--bot-ink-50);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.vp-doc .update-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 18px 0 0;
+  color: var(--bot-ink-50);
+  font-size: 13px;
+}
+
+.vp-doc .update-when {
+  margin: 0 0 20px;
+  color: var(--bot-ink-50);
+  font-size: 13px;
+}
+
+.vp-doc .update-callout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 0 0;
+  padding: 16px 18px;
+  border: 1px solid var(--bot-hairline);
+  border-radius: 12px;
+  background: var(--bot-lift-10);
+}
+
+.vp-doc .update-callout p {
+  flex: 1 1 320px;
+  margin: 0;
+  color: var(--bot-ink-70);
+  font-size: 15px;
+}
+
+/* The button sits in its own paragraph (markdown wraps it); keep that one
+   from stretching like the text beside it. */
+.vp-doc .update-callout p:has(> .update-button) {
+  flex: 0 0 auto;
+}
+
+.vp-doc .update-callout .update-button {
+  display: inline-block;
+  padding: 9px 18px;
+  border-radius: 999px;
+  background: var(--bot-primary-500);
+  color: #ffffff;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.vp-doc .update-callout .update-button:hover {
+  background: var(--bot-primary-600);
+  color: #ffffff;
+}

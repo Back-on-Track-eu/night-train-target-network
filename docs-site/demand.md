@@ -1,9 +1,9 @@
 ---
-title: Demand and revenue
-description: Why the revenue side of this model is an assumption you set, not a forecast.
+title: Demand and fares
+description: Why the demand — and with it the revenue side of this model — is an assumption you set, not a forecast, and how the fares are built.
 ---
 
-# Demand and revenue
+# Demand and fares
 
 ## What the model does today
 
