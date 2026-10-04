@@ -79,7 +79,7 @@ watch(filtered, () => {
   <Popover
     ref="popoverRef"
     :pt="{
-      root: { class: 'country-select-overlay !p-0 !rounded-xl !shadow-2xl !min-w-64' },
+      root: { class: 'country-select-overlay search-popover !p-0 !rounded-xl !shadow-2xl' },
       content: { class: '!p-0 !bg-transparent' },
     }"
     @show="onShow"
@@ -115,14 +115,14 @@ watch(filtered, () => {
         @keydown.up.prevent="move(-1)"
       />
     </div>
-    <div ref="listRef" class="thin-scroll overflow-y-auto p-1.5" style="max-height: 20rem">
+    <div ref="listRef" class="search-popover-list thin-scroll overflow-y-auto p-1.5">
       <p v-if="!filtered.length" class="px-4 py-3 text-base text-primary-50/70">
         {{ t('gallery.search.noCountries') }}
       </p>
       <button
         v-for="(c, i) in filtered"
         :key="c.code"
-        class="block w-full cursor-pointer rounded-lg px-4 py-3 text-left text-base text-primary-50 transition-colors"
+        class="block w-full cursor-pointer truncate rounded-lg px-4 py-3 text-left text-base text-primary-50 transition-colors"
         :class="i === activeIndex ? 'bg-[#2b2e4a]' : ''"
         @mouseenter="activeIndex = i"
         @click="pick(c)"

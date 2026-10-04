@@ -146,7 +146,7 @@ watch(filtered, () => {
   <Popover
     ref="popoverRef"
     :pt="{
-      root: { class: 'stop-select-overlay !p-0 !rounded-xl !shadow-2xl !min-w-64' },
+      root: { class: 'stop-select-overlay search-popover !p-0 !rounded-xl !shadow-2xl' },
       content: { class: '!p-0 !bg-transparent' },
     }"
     @show="onShow"
@@ -182,7 +182,7 @@ watch(filtered, () => {
         @keydown.up.prevent="move(-1)"
       />
     </div>
-    <div ref="listRef" class="thin-scroll overflow-y-auto p-1.5" style="max-height: 20rem">
+    <div ref="listRef" class="search-popover-list thin-scroll overflow-y-auto p-1.5">
       <!-- Loading: hold the popover's height with rows, so it doesn't claim
            there is nothing to find while the list is still on its way. -->
       <div
@@ -250,7 +250,7 @@ watch(filtered, () => {
         </span>
         <span
           v-if="subtitle(stop)"
-          class="block text-sm"
+          class="block truncate text-sm"
           :class="isDisabled(stop) ? 'text-primary-50/20' : 'text-primary-50/50'"
         >
           {{ subtitle(stop) }}

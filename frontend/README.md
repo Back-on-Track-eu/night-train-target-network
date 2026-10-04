@@ -63,6 +63,22 @@ rule a browser may reuse a heuristically "fresh" `index.html` after a
 deploy and keep running the previous bundle until the user forces a
 reload. A change to `nginx.conf` ships with the next frontend image build.
 
+**Staying on the current build** (`composables/useFreshBuild.ts`, helpers
+in `lib/freshBuild.ts`). The headers above decide what a browser does on
+its next page load; a tab that stays open across a deploy never makes one.
+So the app checks for itself: shortly after boot, whenever the tab becomes
+visible again and every ten minutes (at most once a minute) it fetches
+`/index.html` with `cache: 'no-store'` and compares the `index-*.js` it
+names with the one that booted the page. A different name means a deploy
+happened — or the browser served a stale `index.html` — and the tab is
+stale. On the gallery it reloads right away (everything it shows is in the
+URL; it waits only while the reader is typing in a field). Anywhere else it
+reloads right after the next navigation to the gallery, which lands on the
+new build at that URL — never inside the builder or a proposal page, where
+state is handed across routes in memory and a forced reload would lose
+work. Off on the dev server, which serves `/src/main.ts` rather than a
+hashed entry.
+
 ---
 
 ## Project Structure
@@ -314,8 +330,13 @@ needs to know which layout it is in, and it is pinned to the same breakpoint as
 the template's `lg:` classes so the observer's root and the column's overflow
 never disagree. The observer is rebuilt when the viewport crosses the
 breakpoint and on every re-activation of the cached page. The mode tabs become
-a 2×2 grid without dividers below `sm`, and the search pill stacks its fields
-full-width with a labelled, full-width Search button.
+a 2×2 grid without dividers below `sm` (labels never wrap), and the search pill
+stacks its fields full-width with a labelled, full-width Search button. The
+stop and country overlays (`StopSelect.vue`, `CountrySelect.vue`) share the
+`.search-popover` rules in `style.css`: a width inside the viewport — a
+popover sizes shrink-to-fit, which on a phone meant "as wide as the longest
+station name" and a page that scrolled sideways — rows that truncate, and a
+shorter list below `sm` so it stays above the on-screen keyboard.
 
 **Two grains on the map** (`GalleryMap.vue`, helpers in `lib/galleryMap.ts`).
 The overview is `map_lines`: one line per stop-pair corridor across the whole
