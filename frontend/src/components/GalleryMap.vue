@@ -14,12 +14,15 @@ import {
   ANCHOR_RADIUS,
   CORRIDOR_COLORS,
   CORRIDOR_COUNT_PROPERTIES,
-  CORRIDOR_DIM_FACTOR,
   CORRIDOR_ISOLATED_WIDTH,
   CORRIDOR_KINDS,
   CORRIDOR_OPACITY,
+  CORRIDOR_RECEDED_COLOR,
+  CORRIDOR_RECEDED_OPACITY,
   COUNTRY_COLOR,
   COUNTRY_FILL_OPACITY,
+  ROUTE_CASING_COLOR,
+  ROUTE_CASING_WIDTH,
   ROUTE_DASH_PATTERN,
   ROUTED_FILTER,
   STOP_END_RADIUS,
@@ -54,10 +57,12 @@ import type { MapLinesSection, MapRouteFeature, ProposalSourceKind } from '@/typ
 //   own, because a corridor is shared by many rows and so names no single card.
 //
 //   ISOLATED — `map_routes` + the row's stops: while a card is hovered, the
-//   corridors dim and that row's own route is drawn instead, flat and in its
-//   source colour, with a dot per stop (endpoints larger and labelled bold).
-//   One route on screen means the count ramp has nothing to compare against,
-//   so varying thickness along it would imply a difference that isn't there.
+//   corridors recede to a faint grey and that row's own route is drawn over
+//   them on a white casing, flat and in its source colour, with a dot per
+//   stop (endpoints larger and labelled bold). One route on screen means the
+//   count ramp has nothing to compare against, so varying thickness along it
+//   would imply a difference that isn't there. Grey rather than dimmed blue
+//   because a thousand proposals overdraw any dimming back to full strength.
 //
 //   SEARCH HIGHLIGHTS — what the active search targets, persistent across
 //   hover: the searched station(s) or city/cities as sapphire pins (a city
@@ -72,9 +77,11 @@ const CORRIDORS_SOURCE = 'gallery-corridors'
 const corridorLayerId = (kind: CorridorKind, dashed: boolean): string =>
   `gallery-corridors-${kind}${dashed ? '-dashed' : ''}`
 const ROUTE_SOURCE = 'gallery-route'
-// Two layers over one source, split on whether the geometry is real routing.
-// `line-dasharray` is not a data-driven property in MapLibre, so the dashed
-// variant has to be its own layer behind a filter rather than an expression.
+// Three layers over one source: a white casing under both variants, then the
+// route split on whether the geometry is real routing. `line-dasharray` is not
+// a data-driven property in MapLibre, so the dashed variant has to be its own
+// layer behind a filter rather than an expression.
+const ROUTE_CASING_LAYER = 'gallery-route-casing'
 const ROUTE_LAYER = 'gallery-route-line'
 const ROUTE_LAYER_DASHED = 'gallery-route-line-dashed'
 const STOPS_SOURCE = 'gallery-route-stops'
@@ -135,9 +142,18 @@ const countries = computed(() => props.highlightedCountries ?? [])
 const selectedCountries = computed(() =>
   selectedCountriesCollection(countryShapes.value, countries.value),
 )
+// Whether the map is currently showing one row rather than the overview —
+// mirrors applyHighlight's own bail-out: a hovered row with neither geometry
+// nor stops on hand leaves the overview standing, and the legend with it.
+const isolating = computed(
+  () =>
+    !!props.highlightedRow &&
+    (!!routeForRow(props.routes, props.highlightedRow) ||
+      (props.highlightedStops?.length ?? 0) > 0),
+)
 // Listed in stacking order, top layer first — the legend then reads the way
-// the map draws. The three context rows appear only while their mark is on
-// the map, so the legend never promises a symbol the reader cannot find.
+// the map draws. The context rows appear only while their mark is on the
+// map, so the legend never promises a symbol the reader cannot find.
 const legendItems = computed(() => [
   ...(anchors.value.length
     ? [
@@ -164,6 +180,17 @@ const legendItems = computed(() => [
     color: CORRIDOR_COLORS.existing,
     label: t('gallery.map.legend.existing'),
   },
+  // While a route is isolated the two colours above describe only that route;
+  // everything else on the map has gone grey, and the legend says so.
+  ...(isolating.value
+    ? [
+        {
+          kind: 'line' as const,
+          color: CORRIDOR_RECEDED_COLOR,
+          label: t('gallery.map.legend.others'),
+        },
+      ]
+    : []),
   ...(selectedCountries.value.features.length
     ? [{ kind: 'country' as const, label: t('gallery.map.legend.country') }]
     : []),
@@ -238,17 +265,23 @@ function fitAll() {
   fitTo(featureBounds(framed), 9)
 }
 
-function setCorridorsDimmed(dimmed: boolean) {
+/** Send the corridors to the background — faint grey — or bring them back in
+ *  their own colours. Both properties are constants on these layers, so
+ *  MapLibre fades them over the transitions set in initLayers. */
+function setCorridorsReceded(receded: boolean) {
   if (!map) return
   for (const kind of CORRIDOR_KINDS) {
-    const opacity = CORRIDOR_OPACITY[kind] * (dimmed ? CORRIDOR_DIM_FACTOR : 1)
-    map.setPaintProperty(corridorLayerId(kind, false), 'line-opacity', opacity)
-    map.setPaintProperty(corridorLayerId(kind, true), 'line-opacity', opacity)
+    const color = receded ? CORRIDOR_RECEDED_COLOR : CORRIDOR_COLORS[kind]
+    const opacity = receded ? CORRIDOR_RECEDED_OPACITY : CORRIDOR_OPACITY[kind]
+    for (const dashed of [false, true]) {
+      map.setPaintProperty(corridorLayerId(kind, dashed), 'line-color', color)
+      map.setPaintProperty(corridorLayerId(kind, dashed), 'line-opacity', opacity)
+    }
   }
 }
 
 /**
- * Draw the hovered row's route and stops over dimmed corridors, or restore the
+ * Draw the hovered row's route and stops over receded corridors, or restore the
  * overview when nothing is hovered. A row we have neither geometry nor stops
  * for — not on a loaded page, with the stops store still loading — leaves the
  * current view alone rather than blanking the map. An ONTD route whose routing
@@ -269,7 +302,7 @@ function applyHighlight(row: GalleryRowRef | null) {
   geoJsonSource(STOPS_SOURCE)?.setData(
     row ? routeStopsCollection(stops, source, anchorIds.value) : EMPTY_POINTS,
   )
-  setCorridorsDimmed(!!row)
+  setCorridorsReceded(!!row)
 
   if (!row) {
     fitAll()
@@ -353,7 +386,8 @@ function initLayers() {
       'line-color': CORRIDOR_COLORS[kind],
       'line-width': corridorWidthExpression(kind),
       'line-opacity': CORRIDOR_OPACITY[kind],
-      // Fading in and out rather than snapping when a card is hovered.
+      // Fading to grey and back rather than snapping when a card is hovered.
+      'line-color-transition': { duration: 200, delay: 0 },
       'line-opacity-transition': { duration: 200, delay: 0 },
     }
     const presence = corridorPresenceFilter(kind)
@@ -377,6 +411,16 @@ function initLayers() {
   }
 
   map.addSource(ROUTE_SOURCE, { type: 'geojson', data: EMPTY_ROUTE })
+  // The casing goes under both variants unfiltered and always solid: a dashed
+  // placeholder route reads as dashes on a white band, which is still plainly
+  // a placeholder, and a dashed casing would only double the gaps.
+  map.addLayer({
+    id: ROUTE_CASING_LAYER,
+    type: 'line',
+    source: ROUTE_SOURCE,
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': ROUTE_CASING_COLOR, 'line-width': ROUTE_CASING_WIDTH },
+  } as maplibregl.LayerSpecification)
   map.addLayer({
     id: ROUTE_LAYER,
     type: 'line',
