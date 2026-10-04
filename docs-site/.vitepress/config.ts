@@ -166,7 +166,10 @@ export default defineConfig({
     footer: {
       message:
         'Published by Back-on-Track. Every number on this site is generated from the ' +
-        'model that produces the tool’s results.',
+        'model that produces the tool’s results. Text, figures and charts: ' +
+        '<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a> ' +
+        '· code: <a href="https://github.com/Back-on-Track-eu/night-train-target-network/blob/staging/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0-or-later</a> ' +
+        '· map data © OpenStreetMap contributors.',
     },
 
     editLink: {

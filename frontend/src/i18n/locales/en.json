@@ -333,15 +333,15 @@
         "trips": "Passenger trips",
         "fromAir": "Shifted from air",
         "fromCar": "Shifted from car",
-        "co2Saved": "CO₂ saved",
-        "co2Intensity": "CO₂ intensity",
-        "subsidyPerCo2": "Subsidy per t CO₂",
+        "co2Saved": "CO₂e saved",
+        "co2Intensity": "CO₂e intensity",
+        "subsidyPerCo2": "Subsidy per t CO₂e",
         "units": {
           "tripsPerYear": "trips / year",
           "paxKm": "pax·km",
-          "tCo2PerYear": "t CO₂ / year",
-          "gPerPaxKm": "g CO₂ / pax·km",
-          "eurPerTCo2": "€ / t CO₂"
+          "tCo2PerYear": "t CO₂e / year",
+          "gPerPaxKm": "g CO₂e / pax·km",
+          "eurPerTCo2": "€ / t CO₂e"
         }
       },
       "groups": {
@@ -403,7 +403,7 @@
         "endAria": "Section end"
       },
       "impact": {
-        "placeholder": "Demand, modal-shift and CO₂ figures are interim estimates until the demand model lands."
+        "placeholder": "Demand, modal-shift and CO₂e figures are interim estimates until the demand model lands."
       },
       "viewsLoading": "Loading the cost and revenue detail…",
       "noClassSplit": "No class split in this view."
@@ -1082,7 +1082,7 @@
     "welcome": {
       "pitch": {
         "network": "We at Back-on-Track are drawing up a Target Network 2032: around 300 night train connections across the continent, twice as many as today, carrying three times the passengers.",
-        "contribute": "This is where you come in. Pick two cities, draw the night train of your dreams on a real map of the European rail network, and see right away what it would cost, how much public money it would need and how much CO₂ it would save — realistic timetables, twelve train compositions, all of it free and open source.",
+        "contribute": "This is where you come in. Pick two cities, draw the night train of your dreams on a real map of the European rail network, and see right away what it would cost, how much public money it would need and how much CO₂e it would save — realistic timetables, twelve train compositions, all of it free and open source.",
         "study": "The best suggestions become the backbone of our study for a European night train network in 2032, which we will present to the European Commission and to national transport authorities, and everyone who contributes gets credited. Curious about the numbers behind all this? Have a look at {source}."
       },
       "source": "our reports and studies",

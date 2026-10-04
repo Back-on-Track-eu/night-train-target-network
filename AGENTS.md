@@ -7,12 +7,12 @@ This is a **monorepo**. The backend and frontend deploy independently; the
 public documentation site ships inside the frontend image and is served at
 `/docs/` on the same origin:
 
-| Part          | Location     | Language                 | Entry point                       |
-| ------------- | ------------ | ------------------------ | --------------------------------- |
-| Backend API   | `backend/`   | Python 3.12 (Flask, uv)  | `backend/main.py`                 |
-| Frontend SPA  | `frontend/`  | TypeScript (Vue 3, Vite) | `frontend/src/main.ts`            |
-| Public docs   | `docs-site/` | Markdown (VitePress)     | `docs-site/.vitepress/config.ts`  |
-| Server deploy | `deploy/`    | Compose + bash           | `deploy/bot-server-app/README.md` |
+| Part          | Location     | Language                 | Entry point                      |
+| ------------- | ------------ | ------------------------ | -------------------------------- |
+| Backend API   | `backend/`   | Python 3.12 (Flask, uv)  | `backend/main.py`                |
+| Frontend SPA  | `frontend/`  | TypeScript (Vue 3, Vite) | `frontend/src/main.ts`           |
+| Public docs   | `docs-site/` | Markdown (VitePress)     | `docs-site/.vitepress/config.ts` |
+| Server deploy | `deploy/`    | Compose + bash           | `deploy/coolify/README.md`       |
 
 Data lives in PostgreSQL 16/PostGIS. Routing is served by a self-hosted
 OpenRailRouting (GraphHopper fork) container. There are two Docker Compose
@@ -301,15 +301,18 @@ planning fails, everything else works). See `deploy/bot-server-app/README.md`.
 There is **no `main` branch**. Two protected branches map to two server
 environments; all work lands via pull request:
 
-| Branch       | Role                                             | Deploys to (on merge)                                            |
-| ------------ | ------------------------------------------------ | ---------------------------------------------------------------- |
-| `staging`    | Integration — every PR targets this              | staging env, `targetnetwork.65.109.137.97.sslip.io` (basic-auth) |
-| `production` | Released — receives `staging` merges once tested | `targetnetwork.back-on-track.eu`                                 |
+| Branch       | Role                                             | Deploys to (on merge)                                              |
+| ------------ | ------------------------------------------------ | ------------------------------------------------------------------ |
+| `staging`    | Integration — every PR targets this              | staging env, `staging.targetnetwork.back-on-track.eu` (basic-auth) |
+| `production` | Released — receives `staging` merges once tested | `targetnetwork.back-on-track.eu`                                   |
 
-A merged PR triggers `.github/workflows/deploy-staging.yml` /
-`deploy-production.yml`: SSH to bot-server → `deploy/bot-server-app/deploy.sh`
-(pull, build, **apply pending DB migrations before the api starts**, health
-check). A failed deploy is a red X on the merge commit.
+A push to either branch is delivered by the `coolify-bot-tn` GitHub App to
+Coolify on the project's server, which rebuilds the app from
+`deploy/coolify/app.docker-compose.yml` (**pending DB migrations are applied
+before the api starts**, then the data tasks run) — see
+`deploy/coolify/README.md`. `.github/workflows/deploy-staging.yml` /
+`deploy-production.yml` are the earlier SSH lane to bot-server, kept as a
+manual fallback.
 
 ---
 
@@ -361,7 +364,6 @@ Full contract, `--baseline` semantics, and editorial rules:
 | `.github/workflows/backend-tests.yml`      | Version-bump enforcement + full backend integration test run                                                                                                                                                  |
 | `.pre-commit-config.yaml`                  | Pre-commit: ruff-format + ruff lint (`backend/`) + prettier (`frontend/`, `docs-site/` — excluding the emitted pages)                                                                                         |
 | `docs/DEPLOY_HANDOVER.md`                  | Living handover to Giovanni: deploy order, staging gotchas, server capacity. Update in the same PR as any change touching deploy, capacity or server data                                                     |
-| `docs/FRONTEND_HANDOVER.md`                | Living handover to Bjarne: every backend change that reaches the API contract. Update in the same PR as the change                                                                                            |
 
 ---
 
@@ -468,23 +470,32 @@ pre-commit install
 
 Run manually: `pre-commit run --all-files`
 
-## Handovers
+## Handovers and `docs/`
 
-Two living documents in `docs/`, one per person the backend hands work to:
+`docs/` holds the few documents that are not about one package
+(`docs/README.md` lists them): the generated `MODEL.md`, the living
+`DEPLOY_HANDOVER.md` (Giovanni — deploy order, standing gotchas, server
+capacity), `PARKED_WORK.md` (designs agreed but not built), the laptop
+route-cache runbook and the manual-demand decision record.
 
-| File                        | Audience | Covers                                                             |
-| --------------------------- | -------- | ------------------------------------------------------------------ |
-| `docs/DEPLOY_HANDOVER.md`   | Giovanni | Deploy order, staging gotchas, server capacity and sizing          |
-| `docs/FRONTEND_HANDOVER.md` | Bjarne   | API contract changes, new fields, new error codes, UI implications |
+The API contract is `backend/api/README.md` together with
+`frontend/src/types/api.ts`; a backend change that reaches the wire updates
+both in the same PR (there is no separate frontend handover any more).
 
-All handovers live in `docs/` — not next to the code they describe. Deploy
-procedure documented in two places drifts into two different procedures.
+**Per-delivery notes do not go into the repository.** The manifest that
+comes with a batch (what changed, how it was verified, rollout steps)
+belongs in the pull request description; its durable facts — a contract,
+an invariant, an environment variable, a deploy step, a decision with its
+reason — go into the README of the package they concern, into
+`DEPLOY_HANDOVER.md` when the server side must act, or into a code comment
+at the place the fact governs. Sketches and design mock-ups are not kept
+either once the feature has shipped; git history is the archive.
 
-**Update in the same PR as the change**, not afterwards. Each entry names
-the version that introduced it (`ROUTE_BUILDER_VERSION`, `CALC_VERSION`) and
-says when it stops applying — a gotcha with no expiry becomes folklore
-nobody dares delete. When an entry is done or obsolete, delete it; git
-history is the archive.
+**Update living documents in the same PR as the change**, not afterwards.
+Each `DEPLOY_HANDOVER.md` entry names the version that introduced it
+(`ROUTE_BUILDER_VERSION`, `CALC_VERSION`) and says when it stops applying —
+a gotcha with no expiry becomes folklore nobody dares delete. When an entry
+is done or obsolete, delete it.
 
 Domain handovers to a single contributor for a single task (e.g.
 `backend/models/infrastructure/stops/charges/HANDOVER.md`) stay with their

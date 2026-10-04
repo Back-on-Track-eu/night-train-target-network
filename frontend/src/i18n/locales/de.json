@@ -333,15 +333,15 @@
         "trips": "Personenfahrten",
         "fromAir": "Vom Flugzeug verlagert",
         "fromCar": "Vom Auto verlagert",
-        "co2Saved": "Eingespartes CO₂",
-        "co2Intensity": "CO₂-Intensität",
-        "subsidyPerCo2": "Zuschuss je t CO₂",
+        "co2Saved": "Eingespartes CO₂e",
+        "co2Intensity": "CO₂e-Intensität",
+        "subsidyPerCo2": "Zuschuss je t CO₂e",
         "units": {
           "tripsPerYear": "Fahrten / Jahr",
           "paxKm": "Pkm",
-          "tCo2PerYear": "t CO₂ / Jahr",
-          "gPerPaxKm": "g CO₂ / Pkm",
-          "eurPerTCo2": "€ / t CO₂"
+          "tCo2PerYear": "t CO₂e / Jahr",
+          "gPerPaxKm": "g CO₂e / Pkm",
+          "eurPerTCo2": "€ / t CO₂e"
         }
       },
       "groups": {
@@ -403,7 +403,7 @@
         "endAria": "Abschnittsende"
       },
       "impact": {
-        "placeholder": "Nachfrage, Verkehrsverlagerung und CO₂ sind vorläufige Schätzwerte, bis das Nachfragemodell vorliegt."
+        "placeholder": "Nachfrage, Verkehrsverlagerung und CO₂e sind vorläufige Schätzwerte, bis das Nachfragemodell vorliegt."
       },
       "viewsLoading": "Die Kosten- und Erlösdetails werden geladen…",
       "noClassSplit": "In dieser Ansicht gibt es keine Aufteilung nach Klassen."
@@ -1082,7 +1082,7 @@
     "welcome": {
       "pitch": {
         "network": "Wir von Back-on-Track arbeiten an einem Target Network 2032: rund 300 Nachtzugverbindungen quer über den Kontinent, doppelt so viele wie heute, mit dreimal so vielen Fahrgästen.",
-        "contribute": "Und hier kommst Du ins Spiel. Wähle zwei Städte, zeichne den Nachtzug Deiner Träume auf eine echte Karte des europäischen Schienennetzes und sieh sofort, was er kosten, wie viel öffentliches Geld er brauchen und wie viel CO₂ er einsparen würde — mit realistischen Fahrplänen, zwölf Zugbildungen, kostenlos und Open Source.",
+        "contribute": "Und hier kommst Du ins Spiel. Wähle zwei Städte, zeichne den Nachtzug Deiner Träume auf eine echte Karte des europäischen Schienennetzes und sieh sofort, was er kosten, wie viel öffentliches Geld er brauchen und wie viel CO₂e er einsparen würde — mit realistischen Fahrplänen, zwölf Zugbildungen, kostenlos und Open Source.",
         "study": "Die besten Vorschläge werden zum Rückgrat unserer Studie für ein europäisches Nachtzugnetz 2032, die wir der Europäischen Kommission und den nationalen Verkehrsbehörden vorlegen — und alle, die mitmachen, werden genannt. Neugierig auf die Zahlen dahinter? Schau in {source}."
       },
       "source": "unsere Berichte und Studien",
