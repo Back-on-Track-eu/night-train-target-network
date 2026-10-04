@@ -7,6 +7,8 @@ import { getCurrentInstance, onBeforeUnmount, readonly, ref, type Ref } from 'vu
 
 /** Tailwind's `lg` breakpoint — the width at which the gallery goes two-column. */
 export const LG_MEDIA_QUERY = '(min-width: 64rem)'
+/** Tailwind's `sm` breakpoint — below it the gallery's histogram draws at phone scale. */
+export const SM_MEDIA_QUERY = '(min-width: 40rem)'
 
 export function useMediaQuery(query: string): Readonly<Ref<boolean>> {
   const matches = ref(false)

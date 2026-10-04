@@ -1333,11 +1333,12 @@ export interface ProposalsFilter {
   user_ids?: number[]
   /** Numeric ranges on summary columns BOTH sources carry, so they narrow
    *  existing trains too; a row with no figure (NULL) never matches. The
-   *  gallery's "typical night train" sieve is three of these
-   *  (lib/typicalNightTrain.ts). */
+   *  gallery's distribution panel edits these four, scoped to proposals
+   *  (lib/galleryRanges.ts). */
   total_distance_km?: ProposalsRange
   total_time_h?: ProposalsRange
   avg_speed_kmh?: ProposalsRange
+  n_stops?: ProposalsRange
   countries?: ProposalsArrayFilter
   stop_ids?: ProposalsArrayFilter
   /** Country pairs a row serves, as "AT__DE" — the two ISO codes joined by a
@@ -1360,7 +1361,12 @@ export type ProposalSourceKind = 'proposal' | 'existing'
  *  run their query (proposals.py::_list_response), so this is a real cost
  *  lever, not just a response filter. Backend default is ["summaries"]. */
 export type ProposalsSection =
-  'summaries' | 'map_lines' | 'map_routes' | 'map_stop_counts' | 'map_country_counts'
+  | 'summaries'
+  | 'map_lines'
+  | 'map_routes'
+  | 'map_stop_counts'
+  | 'map_country_counts'
+  | 'distributions'
 
 export interface ProposalsRequest {
   filter?: ProposalsFilter
@@ -1502,7 +1508,36 @@ export interface ProposalsResponse {
   map_routes?: MapRoutesSection
   map_stop_counts?: MapStopCount[]
   map_country_counts?: MapCountryCountsSection
+  distributions?: DistributionsSection
 }
+
+/** One histogram bin of the `distributions` section. `to` is null on the
+ *  open last bin (values at or past the axis top). */
+export interface DistributionBin {
+  from: number
+  to: number | null
+  n_proposals: number
+  n_existing: number
+}
+
+/** How the filtered set spreads over one measure (backend 0.5.14). Fixed
+ *  axis — origin, top, bin_width are constants on the backend, not fitted to
+ *  the data — so the chart keeps its scale while the filter changes. Counted
+ *  on the request's filter MINUS this measure's own range, which is what
+ *  lets a pair of range handles sit on it. `unknown` counts rows with no
+ *  value in the measure (existing trains without figures). */
+export interface DistributionMeasure {
+  origin: number
+  top: number
+  bin_width: number
+  bins: DistributionBin[]
+  unknown: { n_proposals: number; n_existing: number }
+}
+
+export type DistributionsSection = Record<
+  'total_distance_km' | 'total_time_h' | 'avg_speed_kmh' | 'n_stops',
+  DistributionMeasure
+>
 
 // --- POST /api/proposal/publish ---------------------------------------------
 // Backend: api/proposal_publish.py (@require_auth, guest token is enough). The

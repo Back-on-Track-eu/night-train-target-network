@@ -55,6 +55,7 @@ from psycopg2.extras import Json
 
 from adapters.proposal.filter_builder import (
     DEFAULT_SOURCES,
+    RANGE_COLUMNS,
     build_aggregate_select,
     build_order_by,
     build_where,
@@ -1761,6 +1762,77 @@ class ProposalRepository:
             )
             rows = cur.fetchall()
         return [dict(row) for row in rows]
+
+    # `distributions` axes: (origin, top, bin width) per filter key. Fixed,
+    # not fitted to the data, so the gallery's histogram keeps its scale —
+    # and its range handles their place — while the filter changes under
+    # it. Values at or beyond `top` land in one open last bin; the axes
+    # were set where production's proposals thin out (2026-10-04).
+    _DISTRIBUTION_MEASURES: dict[str, tuple[float, float, float]] = {
+        "total_distance_km": (0, 4000, 100),
+        "total_time_h": (0, 48, 1),
+        "avg_speed_kmh": (0, 160, 5),
+        "n_stops": (2, 26, 1),
+    }
+
+    def distributions(
+        self, filters: Optional[dict] = None, scenario_variant_id: Optional[int] = None
+    ) -> dict[str, dict]:
+        """`distributions` section (§7.1): per measure, how the filtered
+        set spreads over fixed-width bins, split by source. Each measure
+        is counted on the request's filter MINUS its own range, so a
+        histogram shows what that one range keeps or drops of the set the
+        other filters leave — the shape the gallery's range handles sit
+        on. Rows with NULL in the measure (existing trains without
+        figures) are counted apart as `unknown`. One aggregate per
+        measure over the gallery union, no geometry."""
+        filters = filters or {}
+        ctes = f"WITH {self._gallery_ctes(filters, scenario_variant_id)} "
+        result: dict[str, dict] = {}
+        with self._cursor() as cur:
+            for key, (origin, top, width) in self._DISTRIBUTION_MEASURES.items():
+                column = RANGE_COLUMNS[key]
+                n_bins = round((top - origin) / width)
+                where_sql, params = build_where(
+                    {k: v for k, v in filters.items() if k != key}
+                )
+                where_clause = f" WHERE {where_sql}" if where_sql else ""
+                # width_bucket: 0 below origin, n_bins + 1 at/after top, NULL
+                # for NULL — the first two fold into the edge bins.
+                cur.execute(
+                    f"{ctes}"
+                    f"SELECT width_bucket({column}::numeric, %s, %s, %s) AS bucket, "
+                    "       count(*) FILTER (WHERE source = 'proposal') AS n_proposals, "
+                    "       count(*) FILTER (WHERE source = 'existing') AS n_existing "
+                    f"FROM gallery{where_clause} GROUP BY bucket",
+                    [origin, top, n_bins, *params],
+                )
+                bins = [
+                    {
+                        "from": origin + i * width,
+                        "to": origin + (i + 1) * width if i < n_bins else None,
+                        "n_proposals": 0,
+                        "n_existing": 0,
+                    }
+                    for i in range(n_bins + 1)
+                ]
+                unknown = {"n_proposals": 0, "n_existing": 0}
+                for row in cur.fetchall():
+                    target = (
+                        unknown
+                        if row["bucket"] is None
+                        else bins[min(n_bins, max(0, row["bucket"] - 1))]
+                    )
+                    target["n_proposals"] += row["n_proposals"]
+                    target["n_existing"] += row["n_existing"]
+                result[key] = {
+                    "origin": origin,
+                    "top": top,
+                    "bin_width": width,
+                    "bins": bins,
+                    "unknown": unknown,
+                }
+        return result
 
     def map_country_counts(
         self, filters: Optional[dict] = None, scenario_variant_id: Optional[int] = None

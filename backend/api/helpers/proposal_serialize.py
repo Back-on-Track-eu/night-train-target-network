@@ -69,6 +69,7 @@ _INCLUDE_SECTIONS = {
     "map_routes",
     "map_stop_counts",
     "map_country_counts",
+    "distributions",
 }
 # The one home for the default "include" sections — api/proposals.py
 # imports it for the empty-body listing path.

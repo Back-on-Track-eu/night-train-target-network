@@ -57,6 +57,24 @@ export function fetchMapCorridors(
 }
 
 /**
+ * The gallery's histograms (`distributions` section) for a query: how the
+ * filtered set spreads over distance, duration, speed and stops, each counted
+ * without its own range. Its own request like the corridors, so the panel
+ * can show a loading state apart from the cards; cheap (four aggregates, no
+ * geometry), so the interactive budget applies.
+ */
+export function fetchDistributions(
+  body: Pick<ProposalsRequest, 'filter' | 'scenario_variant_id'>,
+  signal?: AbortSignal,
+): Promise<ProposalsResponse> {
+  return apiRequest<ProposalsResponse>('/api/proposals', {
+    method: 'POST',
+    body: { ...body, include: ['distributions'] },
+    ...(signal ? { signal } : {}),
+  })
+}
+
+/**
  * One proposal's current version (route + evaluation + metadata) — same wire
  * shape as publish's response. Used by ProposalViewport to open a stored
  * proposal; it needs the full route.
