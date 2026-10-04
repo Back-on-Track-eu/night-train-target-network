@@ -1155,10 +1155,16 @@
     "map": {
       "legend": {
         "proposed": "Vorschläge",
-        "existing": "Bestehend"
+        "existing": "Bestehend",
+        "stops": "Halte der markierten Strecke",
+        "anchor": "Gesuchter Bahnhof",
+        "country": "Gewähltes Land"
       },
       "loading": "Karte wird geladen…",
-      "failed": "Die Karte konnte nicht geladen werden."
+      "failed": "Die Karte konnte nicht geladen werden.",
+      "highlight": {
+        "relation": "{from} ↔ {to}"
+      }
     },
     "card": {
       "distance": "Entfernung",

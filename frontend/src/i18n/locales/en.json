@@ -1155,10 +1155,16 @@
     "map": {
       "legend": {
         "proposed": "Proposals",
-        "existing": "Existing"
+        "existing": "Existing",
+        "stops": "Stops of the hovered route",
+        "anchor": "Searched station",
+        "country": "Selected country"
       },
       "loading": "Loading map…",
-      "failed": "The map couldn't be loaded."
+      "failed": "The map couldn't be loaded.",
+      "highlight": {
+        "relation": "{from} ↔ {to}"
+      }
     },
     "card": {
       "distance": "Distance",

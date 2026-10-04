@@ -42,7 +42,7 @@ import { createAbortSlot } from '@/lib/apiClient'
 import { ctaButtonClass } from '@/lib/ctaButtonClass'
 import { selectPillPt } from '@/lib/selectPillPt'
 import { asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
-import { buildRelationToken, type GalleryRowRef } from '@/lib/galleryMap'
+import { buildRelationToken, stopMarkers, type GalleryRowRef } from '@/lib/galleryMap'
 import {
   rangesFromQuery,
   rangesToFilter,
@@ -123,6 +123,16 @@ const highlightStopIds = computed(() => {
   }
   if (mode.value === 'byStation') {
     return stationStop.value ? [stationStop.value.stop_id] : []
+  }
+  return []
+})
+
+// The countries the active search names, in pick order — the map tints their
+// land outline. Empty for the stop-based modes.
+const highlightCountries = computed(() => {
+  if (mode.value === 'byCountry') return countryCode.value ? [countryCode.value] : []
+  if (mode.value === 'byRelation') {
+    return [relationFrom.value, relationTo.value].filter((c): c is string => !!c)
   }
   return []
 })
@@ -642,6 +652,26 @@ const isActive = ref(true)
 // shared by many rows and so names no single card.
 const hoveredRow = ref<GalleryRowRef | null>(null)
 
+// Stop coordinates for the map's markers come from the stops store, which the
+// search bar loads anyway; a gallery opened without a stop filter fetches it
+// here so hovering a card can place its stops from the first card on.
+const stopsById = computed(() => new Map(store.stops.map((s) => [s.stop_id, s])))
+const hoveredSummary = computed(() => {
+  const row = hoveredRow.value
+  if (!row) return null
+  return (
+    proposals.value.find((p) =>
+      row.kind === 'proposal'
+        ? p.source === 'proposal' && p.proposal_id === row.id
+        : p.source === 'existing' && p.route_id === row.id,
+    ) ?? null
+  )
+})
+const hoveredStops = computed(() =>
+  stopMarkers(hoveredSummary.value?.stop_ids ?? [], stopsById.value),
+)
+const anchorStops = computed(() => stopMarkers(highlightStopIds.value, stopsById.value))
+
 // LandingIntro's secondary call to action. The target lives here rather than in
 // the intro because the intro has no business knowing what follows it.
 const gallerySection = ref<HTMLElement | null>(null)
@@ -823,10 +853,14 @@ watch(twoColumn, () => {
 onMounted(async () => {
   observeSentinel()
 
-  // Hydrate the search bar from the URL before the first query fires, so a
-  // shared or reloaded /gallery?... link reproduces the exact same results.
+  // The stops are needed either way — by the search bar, and by the map to
+  // place a hovered row's stops — so they start loading at once. Only a link
+  // that names a stop has to WAIT for them: hydrating the search bar from the
+  // URL before the first query fires is what makes a shared or reloaded
+  // /gallery?... link reproduce the exact same results.
+  const stopsLoading = store.stopsStatus === 'success' ? null : store.fetchStops()
   const hasStopParams = ['from', 'to', 'station'].some((k) => queryString(route.query[k]))
-  if (hasStopParams && store.stopsStatus !== 'success') await store.fetchStops()
+  if (hasStopParams && stopsLoading) await stopsLoading
   // Same for a scenario in the link: it can only be resolved against the
   // loaded scenarios, and resolving it after the first load would mean a
   // second one.
@@ -1319,6 +1353,9 @@ onActivated(() => {
           :corridors-status="corridorsStatus"
           :routes="routeFeatures"
           :highlighted-row="hoveredRow"
+          :highlighted-stops="hoveredStops"
+          :anchor-stops="anchorStops"
+          :highlighted-countries="highlightCountries"
           @retry-corridors="loadCorridors"
         />
       </div>
