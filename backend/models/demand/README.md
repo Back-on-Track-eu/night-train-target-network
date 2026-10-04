@@ -1,7 +1,7 @@
 # Night Train — Demand Model
 
-DEMAND 0.1.0 is the **manual demand model** (`docs/2026-09-18_manual_demand_guide.md`,
-sketch `docs/design/2026-09-18_details-sketch-round7.html`): a potential
+DEMAND 0.1.0 is the **manual demand model** (`docs/2026-09-18_manual_demand_guide.md`
+for the decisions D1–D31 it implements): a potential
 demand per year is a request input, split into five traveller groups with
 class preferences, seated onto every composition's places by a fixed rule,
 spread over the sellable OD pairs by a stop-weight matrix, and attributed

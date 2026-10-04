@@ -54,7 +54,8 @@ from types import SimpleNamespace as NS
 
 FIXTURE = Path(__file__).parent / "fixtures" / "demand_reference.json"
 
-# The sketch's compositions (COMPOSITION_CATALOG_OVERVIEW_2026-09-06).
+# The sketch's compositions (places as in models/compositions/calib/CALIBRATION.md,
+# fleet table).
 COMPS = {
     "NEW-BAL-7": {"Seat": 96, "Couchette": 40, "Sleeper": 40, "Capsule": 84},
     "REF-POD-14": {"Seat": 0, "Couchette": 0, "Sleeper": 230, "Capsule": 528},

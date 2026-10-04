@@ -1,7 +1,7 @@
 # Route-cache precompute on a laptop — overnight run, manual upload
 
-*2026-09-21 · audience: whoever runs the batch (David) and whoever has
-pgAdmin on the target server (David, Giovanni)*
+*Written 2026-09-21 after the first full run; for whoever runs the batch
+and whoever has pgAdmin on the target server.*
 
 The normal path for `route_cache` is §7a of `DEPLOY_HANDOVER.md`: run
 `scripts/precompute_route_segments.py` on the server, through the
@@ -54,7 +54,7 @@ cheaper.
 ## 1. Measure (minutes)
 
 ```powershell
-cd C:\Users\david\PycharmProjects\night-train-target-network\backend
+cd <repo>\backend
 uv run python scripts/precompute_route_segments.py --graph infra_2026 --measure-only
 ```
 

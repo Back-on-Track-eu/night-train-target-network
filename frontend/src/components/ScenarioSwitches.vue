@@ -19,7 +19,7 @@ import InfoHint from '@/components/InfoHint.vue'
 // The third row — price & regulatory measures (VAT exemption, energy-tax
 // exemption, track access at direct cost) — is rendered disabled with a
 // "coming soon" hint: those are evaluation-only parameters the backend does
-// not model yet (docs/PARKED_WORK.md §3, WP17). VITE_FEATURE_MEASURES hides
+// not model yet (docs/PARKED_WORK.md §4, WP17). VITE_FEATURE_MEASURES hides
 // the row entirely for deployments that prefer not to show it.
 //
 // A network can carry the same "coming soon" treatment while its

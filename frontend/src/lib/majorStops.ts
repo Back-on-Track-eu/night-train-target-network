@@ -3,7 +3,7 @@ import type { Stop } from '@/types/api'
 // National-capital stops used to prefill the proposal-creation mask with
 // sensible defaults instead of arbitrary random stops. Matched by a name
 // substring against the capital city, since stops carry no importance/capital
-// flag of their own (see backend/models/infrastructure/STOP_CLASSIFICATION.md
+// flag of their own (see backend/models/infrastructure/stops/README.md
 // for a not-yet-implemented tier system that could replace this). Local-
 // language names, matching the naming convention already used by the stop
 // catalogue (e.g. "Wien Hbf", "Praha hl.n.", not "Vienna"/"Prague"). Static

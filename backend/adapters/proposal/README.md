@@ -23,7 +23,6 @@ work now finished, and preserved in git history), plus the parked
 | Evaluation views, normalisations, KPI formulas | [`../../models/evaluation/README.md`](../../models/evaluation/README.md) |
 | Existing-network (ONTD) import & projection | [`../../db/ontd/README.md`](../../db/ontd/README.md) |
 | Domain pipeline, separation of concerns | [`../../models/README.md`](../../models/README.md) |
-| Frontend migration guide | [`../../../docs/FRONTEND_API_HANDOVER_2026-08-07.md`](../../../docs/FRONTEND_API_HANDOVER_2026-08-07.md) |
 | Parked designs (analyze endpoint, pooling) | [`../../../docs/PARKED_WORK.md`](../../../docs/PARKED_WORK.md) |
 
 **Modules in this package**
@@ -1182,8 +1181,7 @@ function in a `before_request` hook, before `@require_auth` has set
 `POST /api/proposal/calc` + `POST /api/proposal/publish` (WP5), and
 `/calc` together with `/calc/matrix` by `POST /api/proposal/family`
 (WP18 B2b). Removal, not deprecation, every time —
-`docs/FRONTEND_HANDOVER.md`; `test_no_stub_endpoints_remain` and the API
-README change accordingly.
+`test_no_stub_endpoints_remain` and the API README change accordingly.
 
 ### 7.7 `GET /api/proposals/stats` — descriptive statistics
 

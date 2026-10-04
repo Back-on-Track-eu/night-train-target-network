@@ -185,7 +185,7 @@ MODEL_VERSION_ROWS: list[tuple[str, str, str, str, str]] = [
         INFRA_MODEL_VERSION,
         INFRA_MODEL_DESCRIPTION,
         "backend/models/infrastructure/model.py",
-        "backend/models/infrastructure/STOP_CLASSIFICATION.md",
+        "backend/models/infrastructure/stops/README.md",
     ),
 ]
 

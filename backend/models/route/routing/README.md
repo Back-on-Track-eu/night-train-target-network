@@ -521,7 +521,7 @@ in `<out>.failures.csv`, and can stop on a clock (`--stop-after-h`). Where
 the database is not reachable from the routing machine, `--export-upload`
 writes a pgAdmin kit (CSV parts + staging/merge SQL) instead of loading.
 Deploy and run notes: `docs/DEPLOY_HANDOVER.md` §7a; off-site batches:
-`docs/2026-09-21_route_cache_precompute_laptop_runbook.md`.
+`docs/ROUTE_CACHE_LAPTOP_RUNBOOK.md`.
 
 ## Verifying the Gauge Profiles
 

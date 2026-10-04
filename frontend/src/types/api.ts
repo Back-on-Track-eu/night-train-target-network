@@ -1003,7 +1003,7 @@ export interface PairOperations {
   trips: TripOperations[]
 }
 
-// --- infrastructure: what each country charged on (handover §6.5) ----------
+// --- infrastructure: what each country charged on (Details card) -----------
 // Per trip, folded from the same component records the cost model priced,
 // so every total here agrees with the breakdown leaf it explains.
 

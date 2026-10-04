@@ -1,23 +1,12 @@
 # Deploy handover — David → Giovanni
 
 **Living document.** Everything the server side needs to know from the
-backend, in one place. Supersedes `deploy/HANDOVER.md` (2026-08-10),
-`deploy/HANDOVER-2026-08-31-scenario-routing.md` and
-`docs/STAGING_DEPLOY_NOTES.md` — all three are folded in here and should be
-deleted.
+backend, in one place (the earlier per-batch handovers are folded in).
 
 Updated after each change that touches deploy, capacity or server data.
-Last update 2026-09-20 (manual demand inputs — two migrations, three model
-bumps, and `deploy.sh` now runs `refresh_proposals.py` after the health
-check on every deploy, §4f; before that 2026-09-16 gate page carries the
-launch text and a slideshow; media fetched from Drive at image build —
-rebuild only, one curl to verify, §20; before that
-2026-09-13 new `infra_2026` OSM base with the Messina train
-ferry — graph cache wipe on your next restart, §4e; 2026-09-12
-CALC 0.9.29 — catering on the summary, two new columns, §4d; 2026-09-07
-WP14 connection pool + gunicorn gthread, the calc matrix endpoint and CALC
-0.9.25 — §4c; 2026-09-06 ONTD bootstrap fix below; 2026-09-05 route builder
-0.9.31 §4a; 0.9.32 §4b).
+The newest entries are the highest-numbered sections at the end — §25
+(2026-10-04) at the time of writing; §1–§4 and the undated sections above
+them are the launch-time batches, kept because their gotchas still apply.
 
 > **Update 2026-09-06 — existing night trains drawn as dashed straight
 > lines: ONTD bootstrap fix, one-off action on every persisted database.**
@@ -735,29 +724,38 @@ reason to restore rather than roll the schema forward-and-back).
 
 ## 5. Standing staging gotchas
 
-Merged in from `docs/STAGING_DEPLOY_NOTES.md`, which this document replaces.
 These apply to every staging deploy, not just this batch. Each says when it
 stops applying.
 
-### The database is fully reseeded, so schema changes need no migration — for now
+### Nothing is reseeded any more — every schema change ships a migration
 
-`db/dev/seed.py` drops and rebuilds `input_params` and `scenario` from
-scratch, and staging currently runs that path via the `Reseed staging`
-workflow. That is why 0.9.28's `gauge_evidence` CHECK change (adding
-`'override'`) shipped without a migration.
+Staging and production both keep their data (production since the launch,
+staging since 2026-09-22); `db/migrate.py` is the only thing that touches
+their schema (`backend/db/README.md`, "Migrations" and "Data tasks").
+A column that exists only in `db/schema.py` reaches a server **by reseed
+alone**, so a schema change without a migration file is a change those
+servers never get.
 
-**When this stops applying:** the moment staging stops being reseeded — at
-the first stable release. From then on every schema change in
-`backend/db/schema.py` needs a matching migration, and the stop catalogue
-needs a new `stop_infra_version` rather than an in-place edit, because
-scenario-pinned versions are immutable (`adapters/proposal/README.md` §4.2).
-This entry is the reminder to make that switch deliberately rather than
-discovering it.
+Two groups of columns were created by `schema.py` only, before that rule
+held, and the loader reads them by name: the stop catalogue enrichment on
+`input_params.stop_infrastructures` (`stop_timezone`, the `stop_charge_*`
+provenance, `name_latin`/`name_ascii`, `country_*`/`city_*` names,
+`city_osm_id`, `gauges_mm`, `gauge_evidence`) and the
+`track_terrain_*`/`track_hsr_*`/`track_min_*`/`track_buffer_*` columns on
+`input_params.track_infrastructures`/`_defaults`. Before deploying a
+backend that reads a new such column, check the server has it:
 
-Note that **production is already past that line** — never reseeded, real
-volunteer submissions since the 18-08 test party. That asymmetry is why this
-batch ships both a migration and a data-migration script even though staging
-would not need either.
+```sql
+SELECT column_name FROM information_schema.columns
+WHERE table_schema = 'input_params' AND table_name = 'stop_infrastructures'
+ORDER BY ordinal_position;          -- 41 columns on a current seed, see db/schema.py
+SELECT count(*) FROM input_params.countries;   -- 41 on a current seed
+```
+
+If a column is missing, the fix is a migration that adds it (and a data
+task if it needs filling), not a reseed.
+
+**When this stops applying:** never — it is the standing rule.
 
 ### The stop catalogue comes from Drive, not from git
 
@@ -1143,7 +1141,7 @@ import the file was routed against — the one failure mode of an off-site
 batch, caught before it seeds routes for the wrong network.
 
 Full runbook, including what to check before the first night:
-`docs/2026-09-21_route_cache_precompute_laptop_runbook.md`.
+`docs/ROUTE_CACHE_LAPTOP_RUNBOOK.md`.
 
 ---
 
@@ -1440,7 +1438,7 @@ before B2b makes it the only compute path; I'll ask for that with B2b.
 **Coupled deploy — now unblocked.** 0.5.0 removes `POST /api/proposal/calc`
 and `/calc/matrix`. A frontend built against 0.4.x cannot compute against
 it, so this backend goes to staging **together with** the frontend's phase
-C (`FRONTEND_HANDOVER.md` §16, done in §17): both halves are on
+C (the family document client, `frontend/src/lib/proposalFamily.ts`): both halves are on
 `proposal-builder-redesign`, so one deploy of that branch carries both. Everything else — gallery,
 load, compare, publish, engagement — keeps working with either frontend.
 
@@ -1720,9 +1718,16 @@ in `admin.schema_migrations` (db/README.md "Data tasks").
 
 **Verify.** On the box, `docker compose … run --rm data-tasks python
 db/run_tasks.py --list` shows the task `done` with a summary like
-`28372 corridor rows written for 1334 proposal(s)`; then the timing loop from
-docs/2026-10-03_gallery_loading_phase1_manifest.md against
-`include: ["map_lines"]` — expect < 1 s. In the database:
+`28372 corridor rows written for 1334 proposal(s)`; then time the gallery's
+map request — expect < 1 s:
+
+```bash
+for i in 1 2 3; do curl -s -o /dev/null -w "%{time_total}s\n" \
+  -H 'Content-Type: application/json' \
+  -d '{"include": ["map_lines"]}' https://targetnetwork.back-on-track.eu/api/proposals; done
+```
+
+In the database:
 
 ```sql
 SELECT status, finished_at, summary FROM admin.data_task_runs ORDER BY run_id DESC;

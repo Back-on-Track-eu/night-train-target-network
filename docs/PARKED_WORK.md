@@ -13,8 +13,9 @@ had been superseded for three weeks; this file is what survived it.
 |---|---|---|
 | Bundle analyze endpoint | Designed 2026-08-04, postponed 2026-08-07 | Nothing — the compute cache prerequisite is done |
 | Connection pooling / intra-worker concurrency | **Shipped** 2026-09-07 as WP14 (`adapters/db_pool.py`, gunicorn gthread) — §2 kept for the reasoning | — |
-| Price & regulatory measures axis (WP17) | Designed 2026-09-07, not started | Nothing — the matrix endpoint is the natural carrier |
+| Price & regulatory measures axis (WP17) | Designed 2026-09-07, not started | Nothing — the family endpoint's variant axis is the carrier |
 | `input_params` schema split | **Dropped** 2026-08-07 | — |
+| Small items (§5) | Noted 2026-10-04 | Nothing |
 
 ---
 
@@ -243,7 +244,7 @@ already permits as the single source. Nothing else depended on the split.
 
 ---
 
-## 3. Price & regulatory measures axis (WP17)
+## 4. Price & regulatory measures axis (WP17)
 
 Designed 2026-09-07 with the viewport rearrangement; the frontend ships
 the three toggles disabled with a "coming soon" hint
@@ -273,7 +274,10 @@ represent a measure. What remains is the pricing: the three rates (VAT
 rate on tickets,
 energy tax share of the energy price, direct-cost TAC rate) are calibrated
 domain parameters → DB tables with sources, per the parameter placement
-rule, not constants in `model.py`.
+rule, not constants in `model.py`. One of the three already exists for
+display: the VAT rate on tickets is calibrated (`models/demand/calib/vat/`,
+backend 0.5.8) and shown under the example fares, but it enters no
+figure — the measure would make it one.
 
 **What it costs.** `CALC_VERSION` bump (calc.py — and the real pricing
 belongs inside `calc_tac.py`/`calc_energy_price.py`, where the per-country
@@ -282,3 +286,39 @@ components), three calibrated rates with sources (Juri/Josh), a flush of
 both family caches, the frontend measures row switched on and the family's
 variant axis multiplying from scenario × composition to
 scenario × measures for the selected composition (the sketch's heatmap).
+
+---
+
+## 5. Small items
+
+Noted while clearing the per-delivery notes out of `docs/` (2026-10-04).
+Each is a few lines of work that waits for a reason to touch the file.
+
+- **Emissions model docstring.** `models/emissions/model.py` (0.2.0) still
+  says the factors "build on the EEA data" and that the non-CO₂ term
+  separates 389 g from "the EEA's CO2-only 160"; the basis is the IEA
+  figure, 144 g, as `docs-site/emissions.md` states. Fixing the text means
+  an `EMISSIONS_MODEL_VERSION` bump (self-gated file) — do it with the next
+  real emissions change.
+- **Per-tonne station charges in the builder.** The API carries
+  `stop_charge_eur.per_tonne_eur` (catalog) and `per_tonne {eur_per_t,
+  train_mass_t}` on station calls (operations) since backend 0.5.0; the
+  frontend types (`types/api.ts`, `StationCall`) do not, so the Czech charge
+  is priced but not shown as such.
+- **Gallery sort keys.** Demand and subsidy per tonne CO₂e are filterable
+  ranges but not in `PROPOSAL_SORT_KEYS` (`frontend/src/types/api.ts`); the
+  gallery polish rounds asked for both twice.
+- **Selection save fallback.** The creator's last scenario/composition
+  selection is saved through publish `overwrite` (debounced); a lean
+  `PATCH /api/proposal/<id>/selection` was sketched for the case that round
+  trip exceeds ~300 ms on production. Not needed so far.
+- **Corridor highlight by country pair.** When a country-pair search is
+  active the map tints the two countries; highlighting only the corridors
+  that cross that pair needs `country_relations` on the `map_lines`
+  features.
+- **Stale i18n keys.** `proposal.supply.sidebar.*`, `settings.demand.*` and
+  `evaluation.demand.estimate*` survive in `en.json`/`de.json` without a
+  consumer (found in the 2026-09-21 German review).
+- **Minimum turnaround per composition.** `DEFAULT_MIN_TURNAROUND_MIN` is
+  one number for every formation; a per-composition value would be more
+  honest once the catalogue carries it.
