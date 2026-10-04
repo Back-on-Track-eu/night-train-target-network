@@ -964,7 +964,8 @@ onActivated(() => {
       <!-- Category tabs: one hairline-divided pill from sm up. Four labels
            side by side are wider than a phone, so below sm they sit in a
            2×2 grid without the dividers (a divider between wrapped rows
-           would join the wrong neighbours). -->
+           would join the wrong neighbours). A label never wraps: "Between
+           Countries" on two lines left its icon alone on the first. -->
       <div
         class="grid w-full grid-cols-2 sm:flex sm:w-auto sm:divide-x sm:divide-primary-50/20 sm:overflow-hidden sm:rounded-full"
       >
@@ -972,7 +973,7 @@ onActivated(() => {
           v-for="tab in tabs"
           :key="tab.value"
           type="button"
-          class="flex cursor-pointer items-center justify-center gap-1.5 px-3 py-2 text-sm leading-none transition sm:px-4"
+          class="flex cursor-pointer items-center justify-center gap-1.5 px-2 py-2 text-sm leading-none whitespace-nowrap transition sm:px-4"
           :class="
             mode === tab.value
               ? 'text-primary-50 font-bold'
