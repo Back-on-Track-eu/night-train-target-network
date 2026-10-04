@@ -909,7 +909,14 @@ OR, since a proposal has exactly one value. `countries`/`stop_ids`
 (`TEXT[]` columns — a proposal can carry several) accept either a plain
 list (`mode: "any"`, OR/overlap `&&` — the default) or `{"values": [...],
 "mode": "all"}` (AND/containment `@>`). `name` accepts a case-insensitive
-substring. Every filterable column is sortable, plus `route_fingerprint`.
+substring. `cities` (0.5.15) is the one filter that is not a column: its
+values are OSM place-node ids (`StopCity.osm_id` in the stops payload) and
+a row matches when one of its `stop_ids` belongs to the city, resolved
+through `input_params.stop_infrastructures.city_osm_id` at query time —
+same `mode: "any"|"all"` shape, where `"all"` means every listed city is
+touched (the gallery's "from Berlin to Wien", which no array operator on
+`stop_ids` can express because a city has several stops). Not sortable.
+Every filterable column is sortable, plus `route_fingerprint`.
 The example below is not exhaustive — it shows one filter of each kind:
 
 ```jsonc
@@ -920,6 +927,7 @@ The example below is not exhaustive — it shows one filter of each kind:
     "user_ids":        [int, ...],                     // e.g. "my proposals"
     "countries":       [str, ...],                     // or {"values": [...], "mode": "any"|"all"}
     "stop_ids":        [str, ...],                     // or {"values": [...], "mode": "any"|"all"}
+    "cities":          [int, ...],                     // OSM place ids; or {"values": [...], "mode": "any"|"all"}
     "composition_ids": [str, ...],
     "name":            "brenner",                      // substring, case-insensitive
     "total_distance_km":   {"min": 800, "max": 1500},

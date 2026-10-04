@@ -1749,6 +1749,17 @@ the task runner in the background, so `admin.schema_migrations` and
 
 ---
 
+## 24b. Gallery `cities` filter — backend 0.5.15, no migration (2026-10-04)
+
+`POST /api/proposals` gains the `cities` filter (OSM place-node ids,
+resolved through `input_params.stop_infrastructures.city_osm_id` at query
+time — nothing stored on the projection, no schema change, no data task).
+The frontend's new search bar (station / city / country × via / from → to)
+sends it for the city tab, so **the api image must be on 0.5.15 before the
+frontend image that uses it** — an older api answers a city search with 400
+"Unknown filter key(s): ['cities']". Rebuild both; nothing to configure.
+Stops applying once 0.5.15 is on production.
+
 ## 24a. Gallery distribution panel — backend 0.5.14, no migration (2026-10-04)
 
 `POST /api/proposals` gains an `include` section, `distributions` (four

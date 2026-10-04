@@ -881,6 +881,7 @@ doesn't run its query at all.
 | `demand_kpis_placeholder` | `demand_kpis_placeholder` | list (OR) | `[bool, ...]` |
 | `countries` | `countries` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
 | `stop_ids` | `stop_ids` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
+| `cities` | — (resolved through `input_params.stop_infrastructures.city_osm_id`) | any/all | `[int, ...]` OSM place-node ids, or `{"values": [...], "mode": "any"\|"all"}` — a row matches when one of its `stop_ids` lies in the city; `"all"` = every listed city touched (backend 0.5.15) |
 | `name` | `name` | substring | case-insensitive `str` |
 | `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same, **one direction** (see below) | range | `{"min": num, "max": num}` |
 
