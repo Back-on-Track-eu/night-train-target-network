@@ -1749,6 +1749,47 @@ the task runner in the background, so `admin.schema_migrations` and
 
 ---
 
+## 24a. Gallery distribution panel — backend 0.5.14, no migration (2026-10-04)
+
+`POST /api/proposals` gains an `include` section, `distributions` (four
+`width_bucket` aggregates over the gallery union, no geometry). Rebuild
+the api and frontend images; nothing to configure, no data task, no
+schema change. The gallery now sends three requests per query (cards,
+corridors, histograms). Stops applying once 0.5.14 is on production.
+
+## 24. Frontend cache headers — frontend image rebuild only (2026-10-04)
+
+**Symptom on staging after #74:** typing the site URL showed the previous
+release; only a reload of the page brought the new one. The frontend's
+nginx sent no `Cache-Control`, so browsers applied heuristic freshness to
+`index.html` (about a tenth of its age since `Last-Modified`), reused the
+cached copy on an address-bar visit, and that copy still named the old
+bundle's hashed files. Caddy adds nothing of its own, so this is purely
+`frontend/nginx.conf`:
+
+- default `Cache-Control: no-cache` — every navigation revalidates;
+  nginx's ETag makes that a 304, not a transfer;
+- `/assets/*` and `/docs/assets/*` (content-hashed by Vite and VitePress)
+  `public, max-age=31536000, immutable`.
+
+**Deploy:** nothing to configure; the file is baked into the frontend image
+and a normal Coolify deploy rebuilds it. **Verify** on the edge host:
+
+```
+curl -sI https://staging.targetnetwork.back-on-track.eu/gallery | grep -i cache-control      # no-cache
+curl -sI https://staging.targetnetwork.back-on-track.eu/assets/<index-*.js> | grep -i cache-control   # immutable
+```
+
+Users who still have the old `index.html` cached see the fix only after
+their next revalidation — the age-based heuristic bounds that to days at
+most; a reload ends it immediately.
+
+**Stops applying** once the headers are on production; the rule itself is
+documented in `frontend/nginx.conf` and frontend/README.md "Production
+image". Delete this section then.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that

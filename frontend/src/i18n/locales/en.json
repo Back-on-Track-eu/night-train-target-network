@@ -1100,6 +1100,37 @@
       "typical": "Typical night trains",
       "typicalHint": "Proposals of one way {minKm}–{maxKm} km, {minH}–{maxH} h and at least {minKmh} km/h on average — the range of our position paper. Existing trains are always shown. Switch off to see every proposal."
     },
+    "distribution": {
+      "title": "Range filters",
+      "measure": {
+        "total_distance_km": "Distance (one way)",
+        "total_time_h": "Duration (one way)",
+        "avg_speed_kmh": "Average speed",
+        "n_stops": "Stops"
+      },
+      "unit": {
+        "total_distance_km": "km",
+        "total_time_h": "h",
+        "avg_speed_kmh": "km/h",
+        "n_stops": "stops"
+      },
+      "min": "Minimum",
+      "max": "Maximum",
+      "any": "any",
+      "lowerHandle": "Lower bound",
+      "upperHandle": "Upper bound",
+      "inEffect": "Ranges in effect:",
+      "none": "none — every proposal",
+      "clear": "Clear this range",
+      "bin": "{from}–{to} {unit}",
+      "binOpen": "{from}+ {unit}",
+      "binCounts": "{proposals} proposals · {existing} existing",
+      "existingAlways": "Existing (always shown)",
+      "unknownExisting": "{count} existing train without figures | {count} existing trains without figures",
+      "loading": "Loading distribution…",
+      "failed": "The distribution couldn't be loaded.",
+      "custom": "Custom ranges"
+    },
     "scenario": {
       "label": "Scenario",
       "applied": "figures on this scenario",

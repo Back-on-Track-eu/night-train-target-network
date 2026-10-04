@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch } from 'vue'
+import {
+  ref,
+  computed,
+  nextTick,
+  onMounted,
+  onBeforeUnmount,
+  onActivated,
+  onDeactivated,
+  watch,
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import Select from 'primevue/select'
@@ -14,11 +23,9 @@ import {
   mdiPlus,
   mdiSortAscending,
   mdiSortDescending,
-  mdiWeatherNight,
 } from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
-import InfoHint from '@/components/InfoHint.vue'
 import LandingIntro from '@/components/LandingIntro.vue'
 import StopSelect from '@/components/StopSelect.vue'
 import CountrySelect from '@/components/CountrySelect.vue'
@@ -26,16 +33,23 @@ import SearchField from '@/components/SearchField.vue'
 import ProposalCard from '@/components/ProposalCard.vue'
 import GalleryScenarioPanel from '@/components/GalleryScenarioPanel.vue'
 import GalleryMap from '@/components/GalleryMap.vue'
+import GalleryDistribution from '@/components/GalleryDistribution.vue'
 import { useStore } from '@/stores/store'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { LG_MEDIA_QUERY, useMediaQuery } from '@/composables/useMediaQuery'
-import { fetchMapCorridors, fetchProposals } from '@/lib/proposalsApi'
+import { fetchDistributions, fetchMapCorridors, fetchProposals } from '@/lib/proposalsApi'
 import { createAbortSlot } from '@/lib/apiClient'
 import { ctaButtonClass } from '@/lib/ctaButtonClass'
 import { selectPillPt } from '@/lib/selectPillPt'
 import { asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
 import { buildRelationToken, type GalleryRowRef } from '@/lib/galleryMap'
-import { TYPICAL_NIGHT_TRAIN, typicalNightTrainFilter } from '@/lib/typicalNightTrain'
+import {
+  rangesFromQuery,
+  rangesToFilter,
+  rangesToQuery,
+  typicalNightTrainRanges,
+  type GalleryRanges,
+} from '@/lib/galleryRanges'
 import { useApiFailure } from '@/composables/useApiFailure'
 import {
   seedToQuery,
@@ -57,6 +71,7 @@ import {
   type ProposalSourceKind,
   type MapLinesSection,
   type MapRouteFeature,
+  type DistributionsSection,
 } from '@/types/api'
 
 const { t } = useI18n()
@@ -162,6 +177,9 @@ let requestSeq = 0
 // The corridor overview runs beside the list under the same rules.
 const corridorSlot = createAbortSlot()
 let corridorSeq = 0
+// And so do the histograms of the distribution panel.
+const distributionSlot = createAbortSlot()
+let distributionSeq = 0
 
 const tabs = computed(() => [
   {
@@ -208,22 +226,18 @@ const canFilterMine = computed(() => store.authChoice === 'user')
 const activeOwnerClass = 'bg-primary-50/15 text-primary-50 font-semibold'
 const inactiveOwnerClass = 'text-primary-50/60 hover:text-primary-50'
 
-// The position paper's "typical night train" sieve (lib/typicalNightTrain.ts):
-// 500–2 000 km, 7–16 h, ≥ 50 km/h, asked of PROPOSALS only — existing trains
-// always stay listed, they are the comparison. ON by default: the gallery
-// opens on the set the launch report counted; the 9 000 km four-nighters and
-// the 2 km city hops are one click away, not in the way. In the URL only when
-// OFF, since on is the default a shared link should not need to spell out.
-const typicalOnly = ref(true)
-const typicalHint = computed(() =>
-  t('gallery.filter.typicalHint', {
-    minKm: TYPICAL_NIGHT_TRAIN.distanceKm.min,
-    maxKm: TYPICAL_NIGHT_TRAIN.distanceKm.max,
-    minH: TYPICAL_NIGHT_TRAIN.timeH.min,
-    maxH: TYPICAL_NIGHT_TRAIN.timeH.max,
-    minKmh: TYPICAL_NIGHT_TRAIN.avgSpeedKmh.min,
-  }),
-)
+// The four range filters the distribution panel edits (lib/galleryRanges.ts:
+// distance, duration, average speed, stops), asked of PROPOSALS only —
+// existing trains always stay listed, they are the comparison. They open on
+// the position paper's "typical night train" preset (500–2 000 km, 7–21 h,
+// ≥ 50 km/h): the gallery shows the set the launch report counted, and the
+// 9 000 km four-nighters and the 2 km city hops are one drag away, not in the
+// way. The preset is the default a shared link need not spell out; anything
+// else goes into the URL explicitly (rangesToQuery).
+const ranges = ref<GalleryRanges>(typicalNightTrainRanges())
+// The histograms the panel draws, one request per query beside the corridors.
+const distributions = ref<DistributionsSection | null>(null)
+const distributionsStatus = ref<'idle' | 'loading' | 'failed'>('idle')
 
 // Set when "Mine" was clicked without an identity: the auth modal opens, and
 // the filter is applied the moment an identity exists — the click meant "show
@@ -455,7 +469,7 @@ function buildFilter(): ProposalsFilter | undefined {
     base.sources = ['proposal']
   }
 
-  if (typicalOnly.value) Object.assign(base, typicalNightTrainFilter())
+  Object.assign(base, rangesToFilter(ranges.value))
 
   if (mode.value === 'aToB') {
     const ids = [fromStop.value?.stop_id, toStop.value?.stop_id].filter((id): id is string =>
@@ -546,6 +560,23 @@ async function loadCorridors(): Promise<void> {
   }
 }
 
+// The histograms for the current query, under the same rules as the
+// corridors: the previous ones stay drawn until the new ones land, and a
+// failure is reported in the panel only.
+async function loadDistributions(): Promise<void> {
+  distributionsStatus.value = 'loading'
+  const seq = ++distributionSeq
+  try {
+    const res = await fetchDistributions(queryScope(), distributionSlot.begin())
+    if (seq !== distributionSeq) return
+    distributions.value = res.distributions ?? null
+    distributionsStatus.value = 'idle'
+  } catch (err) {
+    if (asApiFailure(err)?.kind === 'canceled' || seq !== distributionSeq) return
+    distributionsStatus.value = 'failed'
+  }
+}
+
 // A filter/sort change starts a fresh query from offset 0. Deliberately NOT
 // guarded on `loading`: the point is to replace whatever is in flight.
 //
@@ -556,12 +587,16 @@ async function loadCorridors(): Promise<void> {
 // of the page. loadPage() swaps all of it at once when the response lands,
 // which is the same reasoning `shownTotal` already applies to the result count.
 //
-// The corridor overview reloads with it, except on a sort change: sorting
-// reorders the cards but cannot change which corridors the result set covers.
+// The corridor overview and the histograms reload with it, except on a sort
+// change: sorting reorders the cards but cannot change which corridors the
+// result set covers or how it spreads.
 function resetAndLoad({ corridors: withCorridors = true } = {}): void {
   offset.value = 0
   loadPage()
-  if (withCorridors) loadCorridors()
+  if (withCorridors) {
+    loadCorridors()
+    loadDistributions()
+  }
 }
 
 function retryLoad(): void {
@@ -678,7 +713,7 @@ function currentSearchQuery(): LocationQueryRaw {
   // Only when on: an absent key is the default, and a shared link should not
   // carry a filter that resolves against whoever opens it.
   if (mineOnly.value) query.mine = '1'
-  if (!typicalOnly.value) query.typical = '0'
+  Object.assign(query, rangesToQuery(ranges.value))
   // The SCENARIO, not the variant: the variant ids are materialised and can
   // be rebuilt, the scenario is what a shared link should still mean.
   if (galleryScenario.value && !galleryScenario.value.is_current_base) {
@@ -698,7 +733,7 @@ watch(
     relationTo,
     sourceFilter,
     mineOnly,
-    typicalOnly,
+    ranges,
     // The variant, not the scenario id: the id resolves from null to the
     // base once the scenarios load, and that is not a change of what the
     // request asks for (both send nothing) — watching it reloaded the
@@ -815,7 +850,7 @@ onMounted(async () => {
   // Resolves against whoever is signed in now — the account is deliberately
   // not part of the link.
   mineOnly.value = queryString(route.query.mine) === '1' && canFilterMine.value
-  typicalOnly.value = queryString(route.query.typical) !== '0'
+  ranges.value = rangesFromQuery(route.query)
   const scenarioParam = Number(queryString(route.query.scenario))
   if (
     Number.isInteger(scenarioParam) &&
@@ -824,6 +859,10 @@ onMounted(async () => {
     galleryScenarioId.value = scenarioParam
   }
 
+  // The assignments above reach the watcher on the next flush, so lift the
+  // guard only after it: a link that sets any field (a range, a mode) would
+  // otherwise load the gallery twice.
+  await nextTick()
   hydrating = false
   resetAndLoad()
   router.replace({ query: currentSearchQuery() })
@@ -847,11 +886,16 @@ function teardown(): void {
   // came back to an empty (or stale) column with no skeleton, no count and no
   // retry. An interrupted APPEND needs nothing: the sentinel asks again.
   interrupted.page = loading.value && offset.value === 0
-  interrupted.corridors = corridorsStatus.value === 'loading'
+  interrupted.corridors =
+    corridorsStatus.value === 'loading' || distributionsStatus.value === 'loading'
   // Drop everything in flight; their rejections are 'canceled' and stay silent.
   listSlot.cancel()
   corridorSlot.cancel()
-  if (interrupted.corridors) corridorsStatus.value = 'idle'
+  distributionSlot.cancel()
+  if (interrupted.corridors) {
+    corridorsStatus.value = 'idle'
+    distributionsStatus.value = 'idle'
+  }
 }
 onBeforeUnmount(teardown)
 onDeactivated(teardown)
@@ -878,6 +922,7 @@ onActivated(() => {
     resetAndLoad({ corridors: interrupted.corridors })
   } else if (interrupted.corridors) {
     loadCorridors()
+    loadDistributions()
   }
   interrupted.page = interrupted.corridors = false
 })
@@ -1046,6 +1091,17 @@ onActivated(() => {
       </div>
     </div>
 
+    <!-- The range filters, collapsed to one line by default like the scenario
+         panel below it: the line names the preset or the ranges in effect,
+         and opening it costs the map its height (measureRow) only while the
+         reader is actually editing. -->
+    <GalleryDistribution
+      v-model:ranges="ranges"
+      :distributions="distributions"
+      :status="distributionsStatus"
+      @retry="loadDistributions"
+    />
+
     <!-- The scenario the figures are read on. Collapsed to one line by
          default — see the component: an open panel costs the map its height
          (measureRow), and the summary line already answers "which figures am
@@ -1128,8 +1184,8 @@ onActivated(() => {
              come back and then stays put across later searches — see
              shownTotal. -->
         <div class="flex min-h-8 items-center justify-between gap-2">
-          <!-- The two filters that are not part of the search bar, as one
-               group so the count keeps the right edge to itself. -->
+          <!-- The ownership switch; the range filters live in the distribution
+               panel above the map. -->
           <div class="flex flex-wrap items-center gap-2">
             <!-- Greyed, not hidden, while existing trains alone are listed:
                nobody owns an ONTD row, and a switch that vanished with the
@@ -1170,23 +1226,6 @@ onActivated(() => {
                 {{ t('gallery.filter.mine') }}
               </button>
             </div>
-            <!-- The position paper's sieve, as one toggle in the same idiom as
-                 the ownership pill, on by default. The bounds and what the
-                 toggle leaves alone sit behind the app's ⓘ overlay (InfoHint),
-                 not a browser tooltip. -->
-            <span class="flex items-center gap-1">
-              <button
-                type="button"
-                class="flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1 text-sm transition"
-                :class="typicalOnly ? activeOwnerClass : inactiveOwnerClass"
-                :aria-pressed="typicalOnly"
-                @click="typicalOnly = !typicalOnly"
-              >
-                <AppIcon :path="mdiWeatherNight" :size="16" />
-                {{ t('gallery.filter.typical') }}
-              </button>
-              <InfoHint :text="typicalHint" />
-            </span>
           </div>
           <!-- Loading state lives up here, where the eye is, not at the foot of
                a list that may be scrolled out of view: a spinner and a word

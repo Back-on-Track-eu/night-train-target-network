@@ -942,7 +942,7 @@ The example below is not exhaustive — it shows one filter of each kind:
   "sort":    [{"by": <any filterable column>, "dir": "asc"|"desc"}],
   "limit":   int, "offset": int,
   "include": ["summaries", "map_lines", "map_routes",
-              "map_stop_counts", "map_country_counts"]
+              "map_stop_counts", "map_country_counts", "distributions"]
 }
 ```
 
@@ -1008,6 +1008,17 @@ stored resolution.
   ("which countries have no proposals yet") — `geometry: null` for a
   country code with no matched border (e.g. `"UNK"`, an unattributed
   segment).
+- `distributions` (0.5.14): per measure — `total_distance_km`,
+  `total_time_h`, `avg_speed_kmh`, `n_stops` — fixed-width histogram bins
+  over the filtered set, split by source, plus an `unknown` bucket for
+  rows with NULL in the measure. The axes (`_DISTRIBUTION_MEASURES`:
+  origin, top, bin width) are constants, not fitted to the data, so the
+  gallery's chart keeps its scale while the filter changes; values at or
+  past `top` land in one open last bin (`to: null`). **Each measure is
+  counted on the request's filter minus its own range** — the chart under
+  a pair of range handles shows what that range keeps or drops of the set
+  the other filters leave. One `width_bucket` aggregate per measure over
+  the gallery union, no geometry.
 
 `GET /api/proposals` stays as the empty-filter, summaries-only
 convenience.

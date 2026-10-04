@@ -69,7 +69,7 @@ def filter_proposals():
         "sort":    [{"by": <column>, "dir": "asc"|"desc"}],
         "limit":   int (default 50), "offset": int,
         "include": ["summaries", "map_lines", "map_routes",
-                    "map_stop_counts", "map_country_counts"],
+                    "map_stop_counts", "map_country_counts", "distributions"],
         "scenario_variant_id": int                 // §5.4a, see below
       }
 
@@ -112,6 +112,15 @@ def filter_proposals():
       "map_country_counts":  GeoJSON FeatureCollection, one feature per
                               country (border geometry + n_proposals /
                               n_existing / n)
+      "distributions":       {<range key>: {origin, top, bin_width,
+                              bins: [{from, to, n_proposals, n_existing}],
+                              unknown: {n_proposals, n_existing}}} for
+                              total_distance_km / total_time_h /
+                              avg_speed_kmh / n_stops — each counted on
+                              the filter MINUS its own range, so the
+                              gallery's histogram shows what that range
+                              keeps or drops; `to` is null on the open
+                              last bin
     """
     body = request.get_json(silent=True) or {}
     errors = validate_list_body(body)
@@ -236,6 +245,10 @@ def _list_response(body: dict):
     if "map_country_counts" in include:
         response["map_country_counts"] = map_country_counts_to_geojson(
             repo.map_country_counts(filters, scenario_variant_id=variant)
+        )
+    if "distributions" in include:
+        response["distributions"] = repo.distributions(
+            filters, scenario_variant_id=variant
         )
     return jsonify(response), 200
 

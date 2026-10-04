@@ -845,6 +845,98 @@ class TestIncludeSections:
 
 
 # =============================================================================
+# distributions — fixed-width histograms per measure, each counted on the
+# filter minus its own range (the gallery's range handles sit on them)
+# =============================================================================
+
+
+_DISTRIBUTION_KEYS = {"total_distance_km", "total_time_h", "avg_speed_kmh", "n_stops"}
+
+
+def _bin_totals(measure: dict) -> tuple[int, int]:
+    """(proposals, existing) summed over the bins and the unknown bucket."""
+    bins = measure["bins"] + [measure["unknown"]]
+    return sum(b["n_proposals"] for b in bins), sum(b["n_existing"] for b in bins)
+
+
+class TestDistributions:
+    def test_axes_are_fixed_and_the_last_bin_open(self, api_base, published):
+        body = _gallery(api_base, include=["distributions"])
+        assert set(body) == {"distributions"}
+        dists = body["distributions"]
+        assert set(dists) == _DISTRIBUTION_KEYS
+        for measure in dists.values():
+            bins = measure["bins"]
+            n = round((measure["top"] - measure["origin"]) / measure["bin_width"])
+            assert len(bins) == n + 1
+            assert bins[0]["from"] == measure["origin"]
+            assert bins[-1] == {
+                "from": measure["top"],
+                "to": None,
+                "n_proposals": bins[-1]["n_proposals"],
+                "n_existing": bins[-1]["n_existing"],
+            }
+            for a, b in zip(bins, bins[1:]):
+                assert a["to"] == b["from"]
+                assert a["to"] - a["from"] == pytest.approx(measure["bin_width"])
+
+    def test_bins_account_for_every_row(self, api_base, existing_routes, published):
+        """Bins plus the unknown bucket sum to the filtered total, per
+        source — nothing falls between the bins or off the open end."""
+        body = _gallery(api_base, include=["summaries", "distributions"], limit=500)
+        rows = body["summaries"]["proposals"]
+        n_proposals = sum(r["source"] == "proposal" for r in rows)
+        n_existing = sum(r["source"] == "existing" for r in rows)
+        assert body["summaries"]["total"] == len(rows)
+        for measure in body["distributions"].values():
+            assert _bin_totals(measure) == (n_proposals, n_existing)
+
+    def test_the_published_proposal_lands_in_its_one_way_bin(self, api_base, published):
+        row = _summary_row(api_base, published)
+        body = _gallery(
+            api_base,
+            filter={"proposal_ids": [published["proposal_id"]]},
+            include=["distributions"],
+        )
+        for key, value in (
+            ("total_distance_km", row["total_distance_km"]),
+            ("total_time_h", row["total_time_h"]),
+            ("avg_speed_kmh", row["avg_speed_kmh"]),
+            ("n_stops", row["n_stops"]),
+        ):
+            measure = body["distributions"][key]
+            hit = [
+                b
+                for b in measure["bins"]
+                if b["from"] <= value and (b["to"] is None or value < b["to"])
+            ]
+            assert len(hit) == 1, key
+            assert hit[0]["n_proposals"] == 1, key
+            assert _bin_totals(measure) == (1, 0)
+
+    def test_each_measure_ignores_its_own_range(
+        self, api_base, existing_routes, published
+    ):
+        """A distance range that drops every proposal still leaves the
+        distance histogram whole (that is the range the handles move on),
+        while every other measure's histogram reflects it; the scoped
+        form keeps the existing side intact everywhere."""
+        empty = {"min": 100_000, "scope": "proposal"}
+        full = _gallery(api_base, include=["distributions"])["distributions"]
+        sieved = _gallery(
+            api_base,
+            filter={"total_distance_km": empty},
+            include=["distributions"],
+        )["distributions"]
+
+        assert sieved["total_distance_km"] == full["total_distance_km"]
+        for key in _DISTRIBUTION_KEYS - {"total_distance_km"}:
+            n_proposals, n_existing = _bin_totals(sieved[key])
+            assert n_proposals == 0, key
+            assert n_existing == _bin_totals(full[key])[1], key
+
+
+# =============================================================================
 # Engagement counts — live-joined from proposals.likes / proposals.comments,
 # neither one a summary column
 # =============================================================================
