@@ -1,8 +1,8 @@
 """
 pipeline.py
 ===========
-Central dispatch for the route-plan-and-evaluate pipeline (PROPOSALS_
-DESIGN.md §2.1, WP5). Pure domain-level orchestration: no Flask, no dicts,
+Central dispatch for the route-plan-and-evaluate pipeline (WP5; the
+proposals subsystem is described in adapters/proposal/README.md). Pure domain-level orchestration: no Flask, no dicts,
 no DB writes — composes models/route, models/demand, and models/evaluation
 so every caller (the /calc endpoint, publish, the future compute cache of
 WP13, model-level tests, and the DB seed's example proposal) shares one

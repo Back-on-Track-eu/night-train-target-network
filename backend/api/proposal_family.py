@@ -6,7 +6,7 @@ scenario variant × composition of a stop list + HOW.
 
   POST /api/proposal/family
       stops + HOW (+ optional scenario_variant_ids, composition_ids,
-      presented) → the §2.5 document. Synchronous; built once per family
+      presented) → the family document (api/README.md, "Proposal Family"). Synchronous; built once per family
       key and served from family.documents afterwards.
   GET  /api/proposal/family/<key>
       the document again, or 404 once its TTL has passed (the client

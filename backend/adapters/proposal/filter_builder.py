@@ -26,16 +26,16 @@ Column kinds, mapped onto proposals.proposal_summaries (§5.4):
                             (mode "all", AND) — see _parse_array_filter()
   SUBSTRING_COLUMNS      — case-insensitive `ILIKE` substring match
 
-trip_windows and bbox reach past proposal_summaries (into stop_times and
-geom_simplified respectively) and are built separately, since they don't
-fit the generic per-column shape. likes_count and comments_count are also
-not proposal_summaries columns — repository.py joins them in live from
-proposals.likes / proposals.comments (both change independently of
-publish/refresh, so storing them on the summary projection would go
-stale) — but they're declared here as ordinary RANGE_COLUMNS entries
-because, once the repository's query aliases the joined counts under
-those names, they behave exactly like any other numeric column for
-filtering/sorting purposes.
+trip_windows, bbox and cities reach past proposal_summaries (into
+stop_times, geom_simplified and the stop catalogue respectively) and are
+built separately, since they don't fit the generic per-column shape.
+likes_count and comments_count are also not proposal_summaries columns —
+repository.py joins them in live from proposals.likes / proposals.comments
+(both change independently of publish/refresh, so storing them on the
+summary projection would go stale) — but they're declared here as ordinary
+RANGE_COLUMNS entries because, once the repository's query aliases the
+joined counts under those names, they behave exactly like any other numeric
+column for filtering/sorting purposes.
 route_builder_version/calc_version/scenario_id are NOT filterable — every gallery row already carries the
 current base scenario by construction (§7.1's "every stored proposal ...
 always representing the current base scenario"), and the two version
@@ -194,13 +194,21 @@ _SOURCES_KEY = "sources"
 SUPPORTED_SOURCES: frozenset[str] = frozenset({"proposal", "existing"})
 DEFAULT_SOURCES: tuple[str, ...] = ("proposal", "existing")
 
+# Cities are not a summary column: a row carries stop_ids, and a stop
+# belongs to a city through the catalogue (input_params.stop_infrastructures
+# .city_osm_id, the stable key behind the localized city names). The filter
+# therefore resolves through the catalogue at query time rather than
+# storing a second array on the projection — see _build_cities_clause().
+# Same any/all shape as ARRAY_COLUMNS, values are OSM place-node ids.
+CITIES_KEY = "cities"
+
 ALL_FILTER_KEYS: frozenset[str] = frozenset(
     set(RANGE_COLUMNS)
     | set(DATETIME_RANGE_COLUMNS)
     | set(LIST_COLUMNS)
     | set(ARRAY_COLUMNS)
     | set(SUBSTRING_COLUMNS)
-    | {_SOURCES_KEY, "trip_windows", "bbox"}
+    | {_SOURCES_KEY, "trip_windows", "bbox", CITIES_KEY}
 )
 
 
@@ -298,7 +306,40 @@ def build_where(filters: dict) -> tuple[str, list]:
         )
         params.extend([west, south, east, north])
 
+    cities = filters.get(CITIES_KEY)
+    if cities is not None:
+        clause, city_params = _build_cities_clause(cities)
+        clauses.append(clause)
+        params.extend(city_params)
+
     return " AND ".join(clauses), params
+
+
+# A row touches a city when any of its stops belongs to it. The catalogue
+# is snapshot-versioned (one row per stop per version), which EXISTS
+# absorbs — a stop's city does not move between versions, and even if it
+# did, "any version" is the right reading for a gallery search.
+_CITY_EXISTS = (
+    "EXISTS (SELECT 1 FROM input_params.stop_infrastructures si "
+    "WHERE si.city_osm_id {predicate} AND si.stop_id = ANY(stop_ids))"
+)
+
+
+def _build_cities_clause(raw) -> tuple[str, list]:
+    """Mode "any" (the plain-list default) is one EXISTS over the whole
+    id list — at least one of the cities is touched. Mode "all" is one
+    EXISTS per city, AND-joined — every city is touched, which is what a
+    "from Berlin to Wien" search means and what no array operator on
+    stop_ids could express (containment would ask for specific stops, and
+    a city has several)."""
+    values, mode = _parse_array_filter(raw)
+    ids = [int(v) for v in values]
+    if mode == "all":
+        # Vacuous for an empty list, like `@> '{}'` is on the array columns.
+        if not ids:
+            return "TRUE", []
+        return " AND ".join(_CITY_EXISTS.format(predicate="= %s") for _ in ids), ids
+    return _CITY_EXISTS.format(predicate="= ANY(%s)"), [ids]
 
 
 def _parse_array_filter(raw) -> tuple[list, str]:

@@ -6,8 +6,8 @@ it on every version bump; a fresh database starts with it empty.
 
 | module | table | holds |
 |---|---|---|
-| `document_cache.py` | `family.documents` | one serialised §2.5 document per family key (`models/family/key.py`), TTL-bounded |
-| *(B2b)* `member_cache.py` | `family.members` | today `proposals.compute_cache_pointer` / `_result` (`adapters/proposal/compute_cache.py`) — one member payload per resolved request, the member cache behind `compute_member()` and the views endpoint |
+| `document_cache.py` | `family.documents` | one serialised family document (`api/README.md`, "Proposal Family") per family key (`models/family/key.py`), TTL-bounded |
+| `member_cache.py` | `family.members` | one member payload per resolved request — the member cache behind `compute_member()` and the views endpoint |
 
 Both follow the same discipline as the existing compute cache: UNLOGGED
 tables, TTL enforced on **read** (an expired-but-unswept row is a miss,

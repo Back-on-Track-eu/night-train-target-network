@@ -17,9 +17,9 @@ are read directly by the energy model (terrain), the router (schedule
 supplement) and the timetable (dwell floor, high-speed access).
 
 `model.py` holds `INFRA_MODEL_VERSION`, the changelog and the standard values
-that belong to no single domain. `STOP_CLASSIFICATION.md` documents the stop
-catalog pipeline; `stops/` is reserved for the station-charge calibration that
-does not exist yet.
+that belong to no single domain. `stops/README.md` documents the stop
+catalog classification pipeline, and `stops/charges/` the station-charge
+calibration behind `stop_charge_eur`.
 
 ## The contract every package follows
 

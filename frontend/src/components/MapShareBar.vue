@@ -255,7 +255,7 @@ const menuItemClass =
 </template>
 
 <style>
-/* Unscoped on purpose, exactly as CountrySelect/StopSelect do it: the Popover
+/* Unscoped on purpose, exactly as OptionSelect/StopSelect do it: the Popover
    is teleported out of this component, so a scoped selector never reaches it —
    and without an explicit surface it keeps the Lara theme's LIGHT panel, on
    which these light-on-dark item colours are invisible. */

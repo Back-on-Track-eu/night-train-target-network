@@ -1,6 +1,8 @@
 # Manual demand inputs — implementation guide
 
-Date: 2026-09-18 · Sketch: `docs/design/2026-09-18_details-sketch-round7.html` (rounds 7 – 7ac, all decisions confirmed by David on 2026-09-18) · Supersedes the demand part of `docs/2026-09-09_supply_settings_plan.md` and the phase-5 demand sketch of 2026-09-13.
+Date: 2026-09-18 (decisions confirmed by David on 2026-09-18 over sketch rounds 7 – 7ac; the sketch itself is no longer kept in the repository) · Supersedes the demand part of the 2026-09-09 supply settings plan and the phase-5 demand sketch of 2026-09-13.
+
+> **Status (2026-10-04).** DEMAND 0.1.0 shipped as specified here; `backend/models/demand/README.md` is the current description of the model and `frontend/README.md` ("The Details card") of the UI. This file remains the decision record D1–D31 that code comments cite by number; §4–§7 below describe the state before implementation.
 
 ## 1. What this is
 
@@ -203,7 +205,7 @@ Phase by phase, one zip per phase, confirmation between phases (ways of working)
 1. Backend integration tests against the Docker stack (`uv run pytest`), `ruff format` + `ruff check`.
 2. Frontend gates: `vue-tsc`, eslint, prettier, vitest, `vite build`.
 3. Version bumps checked in CI (§5).
-4. Handover docs under `docs/`: `FRONTEND_HANDOVER_DEMAND.md` (fields, response shape, parity tests) and a `DEPLOY_HANDOVER.md` addendum (migration script, reseed of families).
+4. Documentation: the package READMEs and a `DEPLOY_HANDOVER.md` entry (migration script, refresh of families) — done, see the status note at the top.
 5. Commits: `feat` / `test` / `docs` split per phase.
 
 ## 7. Open items (not blocking; confirm when they come up)

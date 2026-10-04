@@ -1,0 +1,2395 @@
+{
+ "edition": "2026-10-launch",
+ "generated_at": "2026-10-04T14:33:35+00:00",
+ "exported_at": "2026-10-04T16:32:33.785644+02:00",
+ "window": {
+  "start": "2026-09-22",
+  "end": "2026-10-03",
+  "days": 12,
+  "day_labels": [
+   "22",
+   "23",
+   "24",
+   "25",
+   "26",
+   "27",
+   "28",
+   "29",
+   "30",
+   "1",
+   "2",
+   "3"
+  ]
+ },
+ "envelope": {
+  "km": [
+   500,
+   2000
+  ],
+  "h": [
+   7,
+   21
+  ],
+  "min_speed_kmh": 50,
+  "city_km": 50
+ },
+ "gallery": "/gallery",
+ "people": {
+  "total": 451,
+  "registered": 179,
+  "guests": 272,
+  "day_one_active": 149,
+  "returned": 85,
+  "active_per_day": [
+   149,
+   119,
+   92,
+   74,
+   35,
+   31,
+   24,
+   28,
+   23,
+   18,
+   17,
+   10
+  ]
+ },
+ "built": {
+  "total": 1321,
+  "authors": 449,
+  "max_by_one_author": 108,
+  "single_route_authors_share": 0.5456570155902004,
+  "edited_share": 0.45571536714610145,
+  "republishes": 3122,
+  "max_versions": 39,
+  "per_day": [
+   335,
+   253,
+   189,
+   130,
+   97,
+   77,
+   41,
+   36,
+   39,
+   43,
+   57,
+   24
+  ]
+ },
+ "where": {
+  "cross_border_share": 0.9356548069644209,
+  "domestic_share": 0.0643451930355791,
+  "median_countries": 4,
+  "countries": 34,
+  "stations": 959,
+  "top_countries": [
+   {
+    "iso": "DE",
+    "name": "Germany",
+    "share": 0.538228614685844
+   },
+   {
+    "iso": "FR",
+    "name": "France",
+    "share": 0.46328538985616957
+   }
+  ],
+  "top_relations": [
+   {
+    "label": "Germany–France",
+    "value": 145
+   },
+   {
+    "label": "Germany–Sweden",
+    "value": 108
+   },
+   {
+    "label": "France–Italy",
+    "value": 81
+   }
+  ],
+  "most_used_station": {
+   "label": "Bruxelles-Midi",
+   "value": 205,
+   "href": "/gallery?tab=station&kind=via&a=osm:n17401552"
+  },
+  "top_terminus": {
+   "label": "Barcelona - Sants",
+   "value": 98,
+   "href": "/gallery?tab=station&kind=via&a=osm:n2158044594"
+  },
+  "stations_most_used": [
+   {
+    "label": "Bruxelles-Midi",
+    "value": 205,
+    "href": "/gallery?tab=station&kind=via&a=osm:n17401552"
+   },
+   {
+    "label": "Wien Hauptbahnhof",
+    "value": 190,
+    "href": "/gallery?tab=station&kind=via&a=osm:w423692233"
+   },
+   {
+    "label": "Barcelona - Sants",
+    "value": 161,
+    "href": "/gallery?tab=station&kind=via&a=osm:n2158044594"
+   },
+   {
+    "label": "Hamburg Hauptbahnhof",
+    "value": 160,
+    "href": "/gallery?tab=station&kind=via&a=osm:n2459919677"
+   },
+   {
+    "label": "Berlin Hauptbahnhof",
+    "value": 149,
+    "href": "/gallery?tab=station&kind=via&a=osm:n3856100103"
+   },
+   {
+    "label": "Malmö C",
+    "value": 141,
+    "href": "/gallery?tab=station&kind=via&a=osm:n25589138"
+   },
+   {
+    "label": "Amsterdam Centraal",
+    "value": 113,
+    "href": "/gallery?tab=station&kind=via&a=osm:n4290854847"
+   },
+   {
+    "label": "Strasbourg",
+    "value": 112,
+    "href": "/gallery?tab=station&kind=via&a=osm:n3069229440"
+   }
+  ],
+  "termini_most_used": [
+   {
+    "label": "Barcelona - Sants",
+    "value": 98,
+    "href": "/gallery?tab=station&kind=via&a=osm:n2158044594"
+   },
+   {
+    "label": "Amsterdam Centraal",
+    "value": 86,
+    "href": "/gallery?tab=station&kind=via&a=osm:n4290854847"
+   },
+   {
+    "label": "Berlin Hauptbahnhof",
+    "value": 74,
+    "href": "/gallery?tab=station&kind=via&a=osm:n3856100103"
+   },
+   {
+    "label": "Wien Hauptbahnhof",
+    "value": 72,
+    "href": "/gallery?tab=station&kind=via&a=osm:w423692233"
+   },
+   {
+    "label": "Praha hlavní nádraží",
+    "value": 70,
+    "href": "/gallery?tab=station&kind=via&a=osm:n3134751791"
+   },
+   {
+    "label": "Oslo S",
+    "value": 65,
+    "href": "/gallery?tab=station&kind=via&a=osm:n660921"
+   },
+   {
+    "label": "Stockholm Central",
+    "value": 64,
+    "href": "/gallery?tab=station&kind=via&a=osm:n25948183"
+   },
+   {
+    "label": "Bruxelles-Midi",
+    "value": 64,
+    "href": "/gallery?tab=station&kind=via&a=osm:n17401552"
+   }
+  ],
+  "map": {
+   "countries": {
+    "FR": {
+     "value": 612,
+     "href": "/gallery?tab=country&kind=via&a=FR"
+    },
+    "LU": {
+     "value": 61,
+     "href": "/gallery?tab=country&kind=via&a=LU"
+    },
+    "ES": {
+     "value": 191,
+     "href": "/gallery?tab=country&kind=via&a=ES"
+    },
+    "HU": {
+     "value": 195,
+     "href": "/gallery?tab=country&kind=via&a=HU"
+    },
+    "IT": {
+     "value": 276,
+     "href": "/gallery?tab=country&kind=via&a=IT"
+    },
+    "SI": {
+     "value": 114,
+     "href": "/gallery?tab=country&kind=via&a=SI"
+    },
+    "BE": {
+     "value": 267,
+     "href": "/gallery?tab=country&kind=via&a=BE"
+    },
+    "NL": {
+     "value": 149,
+     "href": "/gallery?tab=country&kind=via&a=NL"
+    },
+    "DE": {
+     "value": 711,
+     "href": "/gallery?tab=country&kind=via&a=DE"
+    },
+    "DK": {
+     "value": 248,
+     "href": "/gallery?tab=country&kind=via&a=DK"
+    },
+    "SE": {
+     "value": 209,
+     "href": "/gallery?tab=country&kind=via&a=SE"
+    },
+    "PL": {
+     "value": 193,
+     "href": "/gallery?tab=country&kind=via&a=PL"
+    },
+    "GB": {
+     "value": 158,
+     "href": "/gallery?tab=country&kind=via&a=GB"
+    },
+    "AT": {
+     "value": 352,
+     "href": "/gallery?tab=country&kind=via&a=AT"
+    },
+    "CH": {
+     "value": 239,
+     "href": "/gallery?tab=country&kind=via&a=CH"
+    },
+    "CZ": {
+     "value": 172,
+     "href": "/gallery?tab=country&kind=via&a=CZ"
+    },
+    "PT": {
+     "value": 16,
+     "href": "/gallery?tab=country&kind=via&a=PT"
+    },
+    "NO": {
+     "value": 101,
+     "href": "/gallery?tab=country&kind=via&a=NO"
+    },
+    "RO": {
+     "value": 80,
+     "href": "/gallery?tab=country&kind=via&a=RO"
+    },
+    "SK": {
+     "value": 93,
+     "href": "/gallery?tab=country&kind=via&a=SK"
+    },
+    "GR": {
+     "value": 39,
+     "href": "/gallery?tab=country&kind=via&a=GR"
+    },
+    "MK": {
+     "value": 42,
+     "href": "/gallery?tab=country&kind=via&a=MK"
+    },
+    "RS": {
+     "value": 78,
+     "href": "/gallery?tab=country&kind=via&a=RS"
+    },
+    "BG": {
+     "value": 51,
+     "href": "/gallery?tab=country&kind=via&a=BG"
+    },
+    "TR": {
+     "value": 33,
+     "href": "/gallery?tab=country&kind=via&a=TR"
+    },
+    "HR": {
+     "value": 111,
+     "href": "/gallery?tab=country&kind=via&a=HR"
+    },
+    "EE": {
+     "value": 16,
+     "href": "/gallery?tab=country&kind=via&a=EE"
+    },
+    "LT": {
+     "value": 35,
+     "href": "/gallery?tab=country&kind=via&a=LT"
+    },
+    "LV": {
+     "value": 17,
+     "href": "/gallery?tab=country&kind=via&a=LV"
+    },
+    "BA": {
+     "value": 28,
+     "href": "/gallery?tab=country&kind=via&a=BA"
+    },
+    "ME": {
+     "value": 11,
+     "href": "/gallery?tab=country&kind=via&a=ME"
+    },
+    "IE": {
+     "value": 2,
+     "href": "/gallery?tab=country&kind=via&a=IE"
+    },
+    "FI": {
+     "value": 7,
+     "href": "/gallery?tab=country&kind=via&a=FI"
+    },
+    "UA": {
+     "value": 5,
+     "href": "/gallery?tab=country&kind=via&a=UA"
+    }
+   },
+   "bubbles": [
+    {
+     "id": "osm:n17401552",
+     "name": "Bruxelles-Midi",
+     "value": 205,
+     "x": 271.7,
+     "y": 710.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n17401552"
+    },
+    {
+     "id": "osm:w423692233",
+     "name": "Wien Hauptbahnhof",
+     "value": 190,
+     "x": 492.2,
+     "y": 784.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:w423692233"
+    },
+    {
+     "id": "osm:n2158044594",
+     "name": "Barcelona - Sants",
+     "value": 161,
+     "x": 231.5,
+     "y": 960.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2158044594"
+    },
+    {
+     "id": "osm:n2459919677",
+     "name": "Hamburg Hauptbahnhof",
+     "value": 160,
+     "x": 375.6,
+     "y": 628.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2459919677"
+    },
+    {
+     "id": "osm:n3856100103",
+     "name": "Berlin Hauptbahnhof",
+     "value": 149,
+     "x": 437.1,
+     "y": 660.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3856100103"
+    },
+    {
+     "id": "osm:n25589138",
+     "name": "Malmö C",
+     "value": 141,
+     "x": 430.4,
+     "y": 563.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n25589138"
+    },
+    {
+     "id": "osm:n4290854847",
+     "name": "Amsterdam Centraal",
+     "value": 113,
+     "x": 282.0,
+     "y": 664.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4290854847"
+    },
+    {
+     "id": "osm:n3069229440",
+     "name": "Strasbourg",
+     "value": 112,
+     "x": 333.9,
+     "y": 773.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3069229440"
+    },
+    {
+     "id": "osm:n4994107827",
+     "name": "Odense",
+     "value": 111,
+     "x": 382.5,
+     "y": 570.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4994107827"
+    },
+    {
+     "id": "osm:n3134751791",
+     "name": "Praha hlavní nádraží",
+     "value": 103,
+     "x": 456.7,
+     "y": 731.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3134751791"
+    },
+    {
+     "id": "osm:n3662847634",
+     "name": "London St. Pancras International",
+     "value": 100,
+     "x": 190.0,
+     "y": 689.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3662847634"
+    },
+    {
+     "id": "osm:n5974664512",
+     "name": "København Syd",
+     "value": 99,
+     "x": 421.5,
+     "y": 562.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5974664512"
+    },
+    {
+     "id": "osm:n25439439",
+     "name": "Mannheim Hauptbahnhof",
+     "value": 98,
+     "x": 347.4,
+     "y": 748.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n25439439"
+    },
+    {
+     "id": "osm:n2894347408",
+     "name": "Budapest-Kelenföld",
+     "value": 95,
+     "x": 540.6,
+     "y": 804.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2894347408"
+    },
+    {
+     "id": "osm:n3739700410",
+     "name": "Københavns Hovedbanegård",
+     "value": 94,
+     "x": 422.4,
+     "y": 561.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3739700410"
+    },
+    {
+     "id": "osm:w19800696",
+     "name": "Linz Hauptbahnhof",
+     "value": 92,
+     "x": 454.0,
+     "y": 781.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:w19800696"
+    },
+    {
+     "id": "osm:n6067258870",
+     "name": "Milano Centrale",
+     "value": 91,
+     "x": 360.8,
+     "y": 857.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n6067258870"
+    },
+    {
+     "id": "osm:n1236383343",
+     "name": "Zürich Hauptbahnhof",
+     "value": 91,
+     "x": 348.7,
+     "y": 806.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1236383343"
+    },
+    {
+     "id": "osm:n4290857016",
+     "name": "Lyon Part-Dieu",
+     "value": 89,
+     "x": 281.3,
+     "y": 849.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4290857016"
+    },
+    {
+     "id": "osm:n2399559029",
+     "name": "Köln Hauptbahnhof",
+     "value": 89,
+     "x": 319.7,
+     "y": 706.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2399559029"
+    },
+    {
+     "id": "osm:n448465221",
+     "name": "Perpignan",
+     "value": 89,
+     "x": 245.0,
+     "y": 928.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n448465221"
+    },
+    {
+     "id": "osm:n302097253",
+     "name": "Salzburg Hauptbahnhof",
+     "value": 87,
+     "x": 431.2,
+     "y": 794.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n302097253"
+    },
+    {
+     "id": "osm:n2574283615",
+     "name": "Karlsruhe Hauptbahnhof",
+     "value": 86,
+     "x": 346.2,
+     "y": 762.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2574283615"
+    },
+    {
+     "id": "osm:n3059639307",
+     "name": "Hannover Hauptbahnhof",
+     "value": 85,
+     "x": 370.7,
+     "y": 664.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3059639307"
+    },
+    {
+     "id": "osm:n7490586752",
+     "name": "Girona",
+     "value": 85,
+     "x": 243.9,
+     "y": 945.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7490586752"
+    },
+    {
+     "id": "osm:n1433117250",
+     "name": "Kolding",
+     "value": 84,
+     "x": 365.9,
+     "y": 567.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1433117250"
+    },
+    {
+     "id": "osm:n205364328",
+     "name": "Frankfurt (Main) Hauptbahnhof",
+     "value": 84,
+     "x": 350.9,
+     "y": 730.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n205364328"
+    },
+    {
+     "id": "osm:n25948183",
+     "name": "Stockholm Central",
+     "value": 83,
+     "x": 523.0,
+     "y": 436.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n25948183"
+    },
+    {
+     "id": "osm:n660921",
+     "name": "Oslo S",
+     "value": 81,
+     "x": 389.2,
+     "y": 415.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n660921"
+    },
+    {
+     "id": "osm:n251904108",
+     "name": "Roma Termini",
+     "value": 75,
+     "x": 421.3,
+     "y": 947.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n251904108"
+    },
+    {
+     "id": "osm:n617483683",
+     "name": "Ljubljana",
+     "value": 73,
+     "x": 458.0,
+     "y": 842.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n617483683"
+    },
+    {
+     "id": "osm:n9814916146",
+     "name": "Warszawa Centralna",
+     "value": 73,
+     "x": 576.9,
+     "y": 668.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n9814916146"
+    },
+    {
+     "id": "osm:n3080746011",
+     "name": "Basel SBB",
+     "value": 73,
+     "x": 331.3,
+     "y": 802.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3080746011"
+    },
+    {
+     "id": "osm:n2470201868",
+     "name": "München Hauptbahnhof",
+     "value": 73,
+     "x": 403.9,
+     "y": 786.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2470201868"
+    },
+    {
+     "id": "osm:n3738591149",
+     "name": "Verona Porta Nuova",
+     "value": 69,
+     "x": 393.4,
+     "y": 858.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3738591149"
+    },
+    {
+     "id": "osm:n3739700409",
+     "name": "Københavns Lufthavn Kastrup",
+     "value": 68,
+     "x": 423.9,
+     "y": 563.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3739700409"
+    },
+    {
+     "id": "osm:n4543919208",
+     "name": "Nürnberg Hauptbahnhof",
+     "value": 68,
+     "x": 395.2,
+     "y": 749.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4543919208"
+    },
+    {
+     "id": "osm:n2465304880",
+     "name": "München Ost",
+     "value": 67,
+     "x": 404.8,
+     "y": 786.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2465304880"
+    },
+    {
+     "id": "osm:n5307127700",
+     "name": "Liège-Guillemins",
+     "value": 67,
+     "x": 294.2,
+     "y": 716.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5307127700"
+    },
+    {
+     "id": "osm:n2553727757",
+     "name": "Frankfurt (Main) Süd",
+     "value": 66,
+     "x": 351.4,
+     "y": 731.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2553727757"
+    },
+    {
+     "id": "osm:n3090733718",
+     "name": "Paris Gare du Nord",
+     "value": 66,
+     "x": 235.4,
+     "y": 765.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3090733718"
+    },
+    {
+     "id": "osm:n3141893115",
+     "name": "Budapest-Keleti",
+     "value": 66,
+     "x": 541.8,
+     "y": 803.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3141893115"
+    },
+    {
+     "id": "osm:n5627130425",
+     "name": "Zagreb Glavni kolodvor",
+     "value": 66,
+     "x": 484.9,
+     "y": 848.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5627130425"
+    },
+    {
+     "id": "osm:n206270454",
+     "name": "Kraków Główny",
+     "value": 66,
+     "x": 557.6,
+     "y": 732.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n206270454"
+    },
+    {
+     "id": "osm:n4048801967",
+     "name": "Rotterdam Centraal",
+     "value": 65,
+     "x": 274.1,
+     "y": 678.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4048801967"
+    },
+    {
+     "id": "osm:n12294207488",
+     "name": "Bologna Centrale",
+     "value": 63,
+     "x": 400.0,
+     "y": 882.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n12294207488"
+    },
+    {
+     "id": "osm:n4725309875",
+     "name": "Hamburg-Harburg",
+     "value": 63,
+     "x": 375.3,
+     "y": 631.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4725309875"
+    },
+    {
+     "id": "osm:n91687004",
+     "name": "Győr",
+     "value": 63,
+     "x": 515.2,
+     "y": 798.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n91687004"
+    },
+    {
+     "id": "osm:n3070631211",
+     "name": "Aachen Hauptbahnhof",
+     "value": 63,
+     "x": 303.8,
+     "y": 711.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3070631211"
+    },
+    {
+     "id": "osm:n348421822",
+     "name": "Antwerpen-Centraal",
+     "value": 62,
+     "x": 273.3,
+     "y": 698.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n348421822"
+    },
+    {
+     "id": "osm:n8745537418",
+     "name": "Lille-Europe",
+     "value": 62,
+     "x": 248.6,
+     "y": 715.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n8745537418"
+    },
+    {
+     "id": "osm:n5248540702",
+     "name": "Lund centralstation",
+     "value": 62,
+     "x": 433.8,
+     "y": 560.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5248540702"
+    },
+    {
+     "id": "osm:n6063641892",
+     "name": "Venezia Mestre",
+     "value": 61,
+     "x": 416.3,
+     "y": 857.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n6063641892"
+    },
+    {
+     "id": "osm:n646734838",
+     "name": "Poznań Główny",
+     "value": 60,
+     "x": 502.0,
+     "y": 663.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n646734838"
+    },
+    {
+     "id": "osm:n6140811391",
+     "name": "Београд центар",
+     "value": 59,
+     "x": 566.9,
+     "y": 875.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n6140811391"
+    },
+    {
+     "id": "osm:n66432827",
+     "name": "Wien Meidling",
+     "value": 58,
+     "x": 491.4,
+     "y": 785.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n66432827"
+    },
+    {
+     "id": "osm:n7998566986",
+     "name": "Ashford International",
+     "value": 57,
+     "x": 208.3,
+     "y": 701.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7998566986"
+    },
+    {
+     "id": "osm:n3805976209",
+     "name": "Avignon-Centre",
+     "value": 55,
+     "x": 280.3,
+     "y": 896.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3805976209"
+    },
+    {
+     "id": "osm:n3390821831",
+     "name": "Warszawa Zachodnia",
+     "value": 55,
+     "x": 576.2,
+     "y": 669.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3390821831"
+    },
+    {
+     "id": "osm:n26824135",
+     "name": "Gare de Lyon",
+     "value": 54,
+     "x": 235.8,
+     "y": 766.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n26824135"
+    },
+    {
+     "id": "osm:n4890696636",
+     "name": "Genève",
+     "value": 54,
+     "x": 304.8,
+     "y": 838.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4890696636"
+    },
+    {
+     "id": "osm:n25397500",
+     "name": "Dresden Hbf",
+     "value": 54,
+     "x": 443.8,
+     "y": 704.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n25397500"
+    },
+    {
+     "id": "osm:n155479759",
+     "name": "Wrocław Główny",
+     "value": 53,
+     "x": 504.3,
+     "y": 702.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n155479759"
+    },
+    {
+     "id": "osm:w429438363",
+     "name": "Dijon-Ville",
+     "value": 53,
+     "x": 284.3,
+     "y": 808.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:w429438363"
+    },
+    {
+     "id": "osm:n2507246162",
+     "name": "Villach Hauptbahnhof",
+     "value": 53,
+     "x": 445.9,
+     "y": 827.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2507246162"
+    },
+    {
+     "id": "osm:n442957822",
+     "name": "Padborg",
+     "value": 53,
+     "x": 363.7,
+     "y": 589.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n442957822"
+    },
+    {
+     "id": "osm:n1305188216",
+     "name": "Göteborgs central",
+     "value": 53,
+     "x": 411.6,
+     "y": 493.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1305188216"
+    },
+    {
+     "id": "osm:n3246621282",
+     "name": "Katowice",
+     "value": 53,
+     "x": 540.6,
+     "y": 726.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3246621282"
+    },
+    {
+     "id": "osm:n7499028216",
+     "name": "Madrid-Puerta de Atocha-Almudena Grandes",
+     "value": 52,
+     "x": 124.7,
+     "y": 984.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7499028216"
+    },
+    {
+     "id": "osm:n8096578751",
+     "name": "Montpellier-Sud-de-France",
+     "value": 52,
+     "x": 264.1,
+     "y": 905.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n8096578751"
+    },
+    {
+     "id": "osm:n2578699502",
+     "name": "Rosenheim",
+     "value": 52,
+     "x": 414.2,
+     "y": 793.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2578699502"
+    },
+    {
+     "id": "osm:n8077757623",
+     "name": "Narbonne",
+     "value": 51,
+     "x": 247.3,
+     "y": 915.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n8077757623"
+    },
+    {
+     "id": "osm:n66180313",
+     "name": "Bruxelles-Nord",
+     "value": 49,
+     "x": 272.2,
+     "y": 709.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n66180313"
+    },
+    {
+     "id": "osm:n33210583",
+     "name": "Warszawa Wschodnia",
+     "value": 49,
+     "x": 577.8,
+     "y": 668.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n33210583"
+    },
+    {
+     "id": "osm:n3964570119",
+     "name": "Luxembourg",
+     "value": 48,
+     "x": 304.6,
+     "y": 745.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3964570119"
+    },
+    {
+     "id": "osm:n1635698272",
+     "name": "Stuttgart Hauptbahnhof",
+     "value": 48,
+     "x": 360.5,
+     "y": 768.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1635698272"
+    },
+    {
+     "id": "osm:n2465563392",
+     "name": "St. Pölten Hauptbahnhof",
+     "value": 48,
+     "x": 478.4,
+     "y": 784.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2465563392"
+    },
+    {
+     "id": "osm:n3129312254",
+     "name": "Pardubice hlavní nádraží",
+     "value": 48,
+     "x": 480.8,
+     "y": 733.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3129312254"
+    },
+    {
+     "id": "osm:n3350963359",
+     "name": "Bratislava hlavná stanica",
+     "value": 47,
+     "x": 505.6,
+     "y": 785.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3350963359"
+    },
+    {
+     "id": "osm:n321555238",
+     "name": "Frankfurt (Oder)",
+     "value": 46,
+     "x": 458.7,
+     "y": 665.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n321555238"
+    },
+    {
+     "id": "osm:n4290857026",
+     "name": "Metz",
+     "value": 46,
+     "x": 305.4,
+     "y": 759.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4290857026"
+    },
+    {
+     "id": "osm:n267379240",
+     "name": "Berlin Südkreuz",
+     "value": 46,
+     "x": 437.1,
+     "y": 661.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n267379240"
+    },
+    {
+     "id": "osm:n3081154349",
+     "name": "Bern",
+     "value": 46,
+     "x": 328.5,
+     "y": 818.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3081154349"
+    },
+    {
+     "id": "osm:n1058668074",
+     "name": "Augsburg Hauptbahnhof",
+     "value": 45,
+     "x": 391.6,
+     "y": 779.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1058668074"
+    },
+    {
+     "id": "osm:n1800313662",
+     "name": "Lausanne",
+     "value": 45,
+     "x": 313.7,
+     "y": 829.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1800313662"
+    },
+    {
+     "id": "osm:n459277140",
+     "name": "Berlin Gesundbrunnen",
+     "value": 45,
+     "x": 437.5,
+     "y": 659.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n459277140"
+    },
+    {
+     "id": "osm:w598166889",
+     "name": "Stratford International",
+     "value": 45,
+     "x": 192.1,
+     "y": 689.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:w598166889"
+    },
+    {
+     "id": "osm:n3315724401",
+     "name": "Břeclav",
+     "value": 45,
+     "x": 501.7,
+     "y": 769.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3315724401"
+    },
+    {
+     "id": "osm:n2506241285",
+     "name": "Paris Gare de l'Est",
+     "value": 44,
+     "x": 235.5,
+     "y": 765.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2506241285"
+    },
+    {
+     "id": "osm:n1721162711",
+     "name": "Montpellier Saint-Roch",
+     "value": 44,
+     "x": 263.4,
+     "y": 905.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1721162711"
+    },
+    {
+     "id": "osm:n6063641896",
+     "name": "Padova",
+     "value": 44,
+     "x": 409.9,
+     "y": 858.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n6063641896"
+    },
+    {
+     "id": "osm:n169701311",
+     "name": "Milano Lambrate",
+     "value": 42,
+     "x": 361.5,
+     "y": 857.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n169701311"
+    },
+    {
+     "id": "osm:n2700123189",
+     "name": "Erfurt Hauptbahnhof",
+     "value": 42,
+     "x": 394.4,
+     "y": 706.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2700123189"
+    },
+    {
+     "id": "osm:n7160009313",
+     "name": "Neumünster",
+     "value": 42,
+     "x": 375.1,
+     "y": 612.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7160009313"
+    },
+    {
+     "id": "osm:n3325029085",
+     "name": "Brno hlavní nádraží",
+     "value": 42,
+     "x": 496.5,
+     "y": 756.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3325029085"
+    },
+    {
+     "id": "osm:n337863237",
+     "name": "Innsbruck Hauptbahnhof",
+     "value": 41,
+     "x": 401.1,
+     "y": 809.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n337863237"
+    },
+    {
+     "id": "osm:n2322481507",
+     "name": "Ringsted",
+     "value": 41,
+     "x": 408.1,
+     "y": 569.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2322481507"
+    },
+    {
+     "id": "osm:n376142577",
+     "name": "Leipzig Hauptbahnhof",
+     "value": 41,
+     "x": 419.1,
+     "y": 695.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n376142577"
+    },
+    {
+     "id": "osm:n30221936",
+     "name": "Frankfurt am Main Flughafen Fernbahnhof",
+     "value": 41,
+     "x": 349.2,
+     "y": 732.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n30221936"
+    },
+    {
+     "id": "osm:n2970328245",
+     "name": "Duisburg Hauptbahnhof",
+     "value": 41,
+     "x": 316.4,
+     "y": 692.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2970328245"
+    },
+    {
+     "id": "osm:n10025673666",
+     "name": "Split",
+     "value": 41,
+     "x": 493.4,
+     "y": 907.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n10025673666"
+    },
+    {
+     "id": "osm:n4813092198",
+     "name": "Zaragoza-Delicias",
+     "value": 40,
+     "x": 175.6,
+     "y": 953.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4813092198"
+    },
+    {
+     "id": "osm:n6063641885",
+     "name": "Venezia Santa Lucia",
+     "value": 40,
+     "x": 417.9,
+     "y": 858.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n6063641885"
+    },
+    {
+     "id": "osm:n4290857022",
+     "name": "Marseille Saint-Charles",
+     "value": 39,
+     "x": 290.8,
+     "y": 913.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4290857022"
+    },
+    {
+     "id": "osm:n4189000814",
+     "name": "Flensburg",
+     "value": 39,
+     "x": 365.1,
+     "y": 590.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4189000814"
+    },
+    {
+     "id": "osm:n9553124517",
+     "name": "Arad",
+     "value": 39,
+     "x": 582.8,
+     "y": 838.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n9553124517"
+    },
+    {
+     "id": "osm:n11878737947",
+     "name": "Hegyeshalom",
+     "value": 39,
+     "x": 506.3,
+     "y": 792.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n11878737947"
+    },
+    {
+     "id": "osm:w169962296",
+     "name": "Bonn Hauptbahnhof",
+     "value": 39,
+     "x": 322.3,
+     "y": 713.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:w169962296"
+    },
+    {
+     "id": "osm:n1777874067",
+     "name": "Genova Piazza Principe",
+     "value": 38,
+     "x": 355.7,
+     "y": 884.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1777874067"
+    },
+    {
+     "id": "osm:n5615156624",
+     "name": "Bordeaux-Saint-Jean",
+     "value": 38,
+     "x": 182.1,
+     "y": 874.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5615156624"
+    },
+    {
+     "id": "osm:n1880180223",
+     "name": "Düsseldorf Hauptbahnhof",
+     "value": 38,
+     "x": 316.7,
+     "y": 698.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1880180223"
+    },
+    {
+     "id": "osm:n636798044",
+     "name": "Olten",
+     "value": 38,
+     "x": 337.1,
+     "y": 807.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n636798044"
+    },
+    {
+     "id": "osm:n3524305897",
+     "name": "Koblenz Hbf",
+     "value": 38,
+     "x": 331.3,
+     "y": 724.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3524305897"
+    },
+    {
+     "id": "osm:n7023751649",
+     "name": "Linköping C",
+     "value": 37,
+     "x": 478.4,
+     "y": 469.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7023751649"
+    },
+    {
+     "id": "osm:n2966093688",
+     "name": "Нови Сад",
+     "value": 37,
+     "x": 555.4,
+     "y": 862.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2966093688"
+    },
+    {
+     "id": "osm:n1600298350",
+     "name": "Fulda",
+     "value": 36,
+     "x": 369.6,
+     "y": 718.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1600298350"
+    },
+    {
+     "id": "osm:n8041901931",
+     "name": "Bremen Hauptbahnhof",
+     "value": 36,
+     "x": 353.7,
+     "y": 643.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n8041901931"
+    },
+    {
+     "id": "osm:n247470668",
+     "name": "Helsingborg C",
+     "value": 36,
+     "x": 424.8,
+     "y": 549.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n247470668"
+    },
+    {
+     "id": "osm:n3419894993",
+     "name": "Berlin Ostbahnhof",
+     "value": 35,
+     "x": 438.3,
+     "y": 660.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3419894993"
+    },
+    {
+     "id": "osm:n2502268309",
+     "name": "Mulhouse-Ville",
+     "value": 35,
+     "x": 326.8,
+     "y": 796.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2502268309"
+    },
+    {
+     "id": "osm:n250082941",
+     "name": "Halle (Saale) Hauptbahnhof",
+     "value": 35,
+     "x": 411.8,
+     "y": 691.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n250082941"
+    },
+    {
+     "id": "osm:n13121251703",
+     "name": "Gara de Nord",
+     "value": 35,
+     "x": 669.8,
+     "y": 883.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n13121251703"
+    },
+    {
+     "id": "osm:n4171354660",
+     "name": "Ústí nad Labem hlavní nádraží",
+     "value": 35,
+     "x": 449.5,
+     "y": 715.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4171354660"
+    },
+    {
+     "id": "osm:n5062517821",
+     "name": "Děčín hlavní nádraží",
+     "value": 35,
+     "x": 452.4,
+     "y": 711.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5062517821"
+    },
+    {
+     "id": "osm:n3419908160",
+     "name": "Paris Austerlitz",
+     "value": 34,
+     "x": 235.6,
+     "y": 766.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3419908160"
+    },
+    {
+     "id": "osm:n9821007500",
+     "name": "Madrid-Chamartín-Clara Campoamor",
+     "value": 34,
+     "x": 124.9,
+     "y": 982.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n9821007500"
+    },
+    {
+     "id": "osm:n2476438979",
+     "name": "München-Pasing",
+     "value": 34,
+     "x": 402.2,
+     "y": 785.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2476438979"
+    },
+    {
+     "id": "osm:n3162532806",
+     "name": "Norrköping C",
+     "value": 34,
+     "x": 488.7,
+     "y": 463.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3162532806"
+    },
+    {
+     "id": "osm:n8476150857",
+     "name": "Halmstad C",
+     "value": 34,
+     "x": 427.9,
+     "y": 528.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n8476150857"
+    },
+    {
+     "id": "osm:n29056915",
+     "name": "Wels Hauptbahnhof",
+     "value": 34,
+     "x": 449.2,
+     "y": 785.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n29056915"
+    },
+    {
+     "id": "osm:n24684084",
+     "name": "Kolín",
+     "value": 34,
+     "x": 470.9,
+     "y": 733.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n24684084"
+    },
+    {
+     "id": "osm:n3134733933",
+     "name": "Praha-Holešovice",
+     "value": 34,
+     "x": 456.7,
+     "y": 730.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3134733933"
+    },
+    {
+     "id": "osm:n7149998196",
+     "name": "Edinburgh Waverley",
+     "value": 33,
+     "x": 133.9,
+     "y": 552.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7149998196"
+    },
+    {
+     "id": "osm:n268894281",
+     "name": "Osnabrück Hauptbahnhof",
+     "value": 33,
+     "x": 339.9,
+     "y": 667.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n268894281"
+    },
+    {
+     "id": "osm:n2007029030",
+     "name": "Tarnów",
+     "value": 33,
+     "x": 576.4,
+     "y": 733.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2007029030"
+    },
+    {
+     "id": "osm:n12633170992",
+     "name": "Pisa Centrale",
+     "value": 33,
+     "x": 382.7,
+     "y": 902.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n12633170992"
+    },
+    {
+     "id": "osm:n33017158",
+     "name": "Nice-Ville",
+     "value": 32,
+     "x": 325.3,
+     "y": 902.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n33017158"
+    },
+    {
+     "id": "osm:n9126486961",
+     "name": "Napoli Centrale",
+     "value": 32,
+     "x": 453.7,
+     "y": 973.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n9126486961"
+    },
+    {
+     "id": "osm:n25528260",
+     "name": "Graz Hauptbahnhof",
+     "value": 32,
+     "x": 474.6,
+     "y": 815.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n25528260"
+    },
+    {
+     "id": "osm:n3101920259",
+     "name": "Berlin-Spandau",
+     "value": 32,
+     "x": 433.9,
+     "y": 659.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3101920259"
+    },
+    {
+     "id": "osm:n5467988372",
+     "name": "Leuven",
+     "value": 32,
+     "x": 278.7,
+     "y": 708.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5467988372"
+    },
+    {
+     "id": "osm:n893439322",
+     "name": "Суботица",
+     "value": 32,
+     "x": 552.5,
+     "y": 840.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n893439322"
+    },
+    {
+     "id": "osm:n27453687",
+     "name": "Würzburg Hauptbahnhof",
+     "value": 31,
+     "x": 374.2,
+     "y": 739.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n27453687"
+    },
+    {
+     "id": "osm:n1835203780",
+     "name": "Firenze Santa Maria Novella",
+     "value": 31,
+     "x": 398.3,
+     "y": 901.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1835203780"
+    },
+    {
+     "id": "osm:n6061881431",
+     "name": "Vicenza",
+     "value": 31,
+     "x": 403.6,
+     "y": 855.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n6061881431"
+    },
+    {
+     "id": "osm:n45198301",
+     "name": "Utrecht Centraal",
+     "value": 31,
+     "x": 285.9,
+     "y": 673.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n45198301"
+    },
+    {
+     "id": "osm:n8044291766",
+     "name": "Knin",
+     "value": 31,
+     "x": 488.9,
+     "y": 894.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n8044291766"
+    },
+    {
+     "id": "osm:n7141879068",
+     "name": "Mainz Hauptbahnhof",
+     "value": 31,
+     "x": 343.5,
+     "y": 734.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7141879068"
+    },
+    {
+     "id": "osm:n13732686802",
+     "name": "Trieste Centrale",
+     "value": 30,
+     "x": 444.5,
+     "y": 852.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n13732686802"
+    },
+    {
+     "id": "osm:n3357946758",
+     "name": "Hamburg-Altona",
+     "value": 30,
+     "x": 374.2,
+     "y": 628.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3357946758"
+    },
+    {
+     "id": "osm:n1458488633",
+     "name": "Dortmund Hbf",
+     "value": 30,
+     "x": 328.9,
+     "y": 690.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1458488633"
+    },
+    {
+     "id": "osm:n10935384072",
+     "name": "Valence-Ville",
+     "value": 30,
+     "x": 281.9,
+     "y": 871.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n10935384072"
+    },
+    {
+     "id": "osm:n3271358589",
+     "name": "Bohumín",
+     "value": 30,
+     "x": 528.5,
+     "y": 736.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3271358589"
+    },
+    {
+     "id": "osm:n3036772660",
+     "name": "Ostrava hlavní nádraží",
+     "value": 30,
+     "x": 526.8,
+     "y": 738.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3036772660"
+    },
+    {
+     "id": "osm:r1821284",
+     "name": "Roma Ostiense",
+     "value": 30,
+     "x": 421.0,
+     "y": 948.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:r1821284"
+    },
+    {
+     "id": "osm:n552820285",
+     "name": "Земун",
+     "value": 30,
+     "x": 565.4,
+     "y": 873.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n552820285"
+    },
+    {
+     "id": "osm:n4553822557",
+     "name": "Brescia",
+     "value": 29,
+     "x": 379.3,
+     "y": 855.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4553822557"
+    },
+    {
+     "id": "osm:n6132514816",
+     "name": "Toulouse-Matabiau",
+     "value": 29,
+     "x": 218.9,
+     "y": 905.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n6132514816"
+    },
+    {
+     "id": "osm:n2460241310",
+     "name": "Lugano",
+     "value": 29,
+     "x": 356.1,
+     "y": 843.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2460241310"
+    },
+    {
+     "id": "osm:n7781275779",
+     "name": "Alvesta",
+     "value": 29,
+     "x": 458.9,
+     "y": 521.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7781275779"
+    },
+    {
+     "id": "osm:n14334692",
+     "name": "Passau Hbf",
+     "value": 29,
+     "x": 438.6,
+     "y": 774.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n14334692"
+    },
+    {
+     "id": "osm:n5526331839",
+     "name": "Fredrikstad",
+     "value": 29,
+     "x": 392.8,
+     "y": 441.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5526331839"
+    },
+    {
+     "id": "osm:n5627130421",
+     "name": "Zagreb Zapadni kolodvor",
+     "value": 29,
+     "x": 484.5,
+     "y": 848.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5627130421"
+    },
+    {
+     "id": "osm:n11561037998",
+     "name": "Udine",
+     "value": 28,
+     "x": 434.8,
+     "y": 842.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n11561037998"
+    },
+    {
+     "id": "osm:n2253949587",
+     "name": "Halkalı",
+     "value": 28,
+     "x": 719.1,
+     "y": 969.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2253949587"
+    },
+    {
+     "id": "osm:n21769883",
+     "name": "Freiburg (Breisgau) Hauptbahnhof",
+     "value": 28,
+     "x": 335.9,
+     "y": 789.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n21769883"
+    },
+    {
+     "id": "osm:n2874038819",
+     "name": "Wiener Neustadt Hauptbahnhof",
+     "value": 28,
+     "x": 489.6,
+     "y": 795.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2874038819"
+    },
+    {
+     "id": "osm:n9947846021",
+     "name": "Скопје",
+     "value": 28,
+     "x": 585.0,
+     "y": 945.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n9947846021"
+    },
+    {
+     "id": "osm:n3374664234",
+     "name": "Opole Główne",
+     "value": 27,
+     "x": 520.6,
+     "y": 715.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3374664234"
+    },
+    {
+     "id": "osm:n10933961551",
+     "name": "Béziers",
+     "value": 27,
+     "x": 251.2,
+     "y": 912.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n10933961551"
+    },
+    {
+     "id": "osm:n7316507989",
+     "name": "Košice",
+     "value": 27,
+     "x": 581.8,
+     "y": 769.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7316507989"
+    },
+    {
+     "id": "osm:w609979867",
+     "name": "Αθήνα",
+     "value": 27,
+     "x": 626.7,
+     "y": 1041.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:w609979867"
+    },
+    {
+     "id": "osm:n6629286841",
+     "name": "Kaunas",
+     "value": 27,
+     "x": 630.6,
+     "y": 587.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n6629286841"
+    },
+    {
+     "id": "osm:n3258261975",
+     "name": "Rzepin",
+     "value": 27,
+     "x": 463.6,
+     "y": 665.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3258261975"
+    },
+    {
+     "id": "osm:n309480751",
+     "name": "Nässjö C",
+     "value": 26,
+     "x": 461.4,
+     "y": 495.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n309480751"
+    },
+    {
+     "id": "osm:w419690632",
+     "name": "Hässleholm C",
+     "value": 26,
+     "x": 444.3,
+     "y": 545.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:w419690632"
+    },
+    {
+     "id": "osm:n3059639306",
+     "name": "Göttingen",
+     "value": 26,
+     "x": 374.1,
+     "y": 689.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3059639306"
+    },
+    {
+     "id": "osm:n6677056493",
+     "name": "Ebbsfleet International",
+     "value": 26,
+     "x": 198.2,
+     "y": 692.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n6677056493"
+    },
+    {
+     "id": "osm:n9289175505",
+     "name": "Brașov",
+     "value": 26,
+     "x": 661.4,
+     "y": 852.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n9289175505"
+    },
+    {
+     "id": "osm:n3080728372",
+     "name": "Brig",
+     "value": 26,
+     "x": 338.6,
+     "y": 835.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3080728372"
+    },
+    {
+     "id": "osm:n8033523329",
+     "name": "Firenze Campo di Marte",
+     "value": 26,
+     "x": 398.8,
+     "y": 901.0,
+     "href": "/gallery?tab=station&kind=via&a=osm:n8033523329"
+    },
+    {
+     "id": "osm:n195885858",
+     "name": "Newcastle",
+     "value": 25,
+     "x": 162.7,
+     "y": 584.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n195885858"
+    },
+    {
+     "id": "osm:n4290857018",
+     "name": "Lyon Perrache",
+     "value": 25,
+     "x": 280.7,
+     "y": 850.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4290857018"
+    },
+    {
+     "id": "osm:n7167271113",
+     "name": "Bristol Temple Meads",
+     "value": 25,
+     "x": 145.0,
+     "y": 692.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7167271113"
+    },
+    {
+     "id": "osm:n10225137894",
+     "name": "Szolnok",
+     "value": 25,
+     "x": 561.8,
+     "y": 812.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n10225137894"
+    },
+    {
+     "id": "osm:n1384282612",
+     "name": "Ulm Hauptbahnhof",
+     "value": 25,
+     "x": 375.1,
+     "y": 778.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1384282612"
+    },
+    {
+     "id": "osm:n3129289404",
+     "name": "Česká Třebová",
+     "value": 25,
+     "x": 493.5,
+     "y": 736.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3129289404"
+    },
+    {
+     "id": "osm:n11635678177",
+     "name": "Milano Porta Garibaldi",
+     "value": 24,
+     "x": 360.5,
+     "y": 857.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n11635678177"
+    },
+    {
+     "id": "osm:n560182965",
+     "name": "Przemyśl Główny",
+     "value": 24,
+     "x": 609.5,
+     "y": 740.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n560182965"
+    },
+    {
+     "id": "osm:n10933998114",
+     "name": "Nîmes Centre",
+     "value": 24,
+     "x": 272.2,
+     "y": 899.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n10933998114"
+    },
+    {
+     "id": "osm:n1601596124",
+     "name": "Ниш",
+     "value": 24,
+     "x": 592.9,
+     "y": 912.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1601596124"
+    },
+    {
+     "id": "osm:n4131026718",
+     "name": "Livorno Centrale",
+     "value": 24,
+     "x": 381.6,
+     "y": 906.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4131026718"
+    },
+    {
+     "id": "osm:n464716607",
+     "name": "Gospić",
+     "value": 24,
+     "x": 474.2,
+     "y": 881.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n464716607"
+    },
+    {
+     "id": "osm:n259449966",
+     "name": "Saarbrücken Hauptbahnhof",
+     "value": 23,
+     "x": 320.3,
+     "y": 755.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n259449966"
+    },
+    {
+     "id": "osm:n11592793752",
+     "name": "Torino Porta Susa",
+     "value": 23,
+     "x": 332.7,
+     "y": 867.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n11592793752"
+    },
+    {
+     "id": "osm:n5643031046",
+     "name": "Køge Nord",
+     "value": 23,
+     "x": 415.2,
+     "y": 567.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n5643031046"
+    },
+    {
+     "id": "osm:n3298971170",
+     "name": "Białystok",
+     "value": 23,
+     "x": 616.0,
+     "y": 641.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3298971170"
+    },
+    {
+     "id": "osm:n29830753",
+     "name": "Konin",
+     "value": 23,
+     "x": 526.6,
+     "y": 668.9,
+     "href": "/gallery?tab=station&kind=via&a=osm:n29830753"
+    },
+    {
+     "id": "osm:n1911997558",
+     "name": "Trenčín",
+     "value": 23,
+     "x": 522.9,
+     "y": 765.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1911997558"
+    },
+    {
+     "id": "osm:n2736023837",
+     "name": "Bad Schandau",
+     "value": 23,
+     "x": 451.2,
+     "y": 707.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2736023837"
+    },
+    {
+     "id": "osm:n3591878656",
+     "name": "Bruck an der Mur",
+     "value": 23,
+     "x": 472.1,
+     "y": 805.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3591878656"
+    },
+    {
+     "id": "osm:n9483069313",
+     "name": "Kőbánya-Kispest",
+     "value": 23,
+     "x": 543.0,
+     "y": 804.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n9483069313"
+    },
+    {
+     "id": "osm:n2459480034",
+     "name": "Bregenz",
+     "value": 22,
+     "x": 370.7,
+     "y": 803.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2459480034"
+    },
+    {
+     "id": "osm:n398836628",
+     "name": "Colmar",
+     "value": 22,
+     "x": 326.8,
+     "y": 787.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n398836628"
+    },
+    {
+     "id": "osm:n1313285471",
+     "name": "Roma Tiburtina",
+     "value": 22,
+     "x": 421.8,
+     "y": 947.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n1313285471"
+    },
+    {
+     "id": "osm:n3044304327",
+     "name": "Köln Süd",
+     "value": 22,
+     "x": 319.3,
+     "y": 707.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3044304327"
+    },
+    {
+     "id": "osm:n11037319841",
+     "name": "Karlovac",
+     "value": 22,
+     "x": 477.0,
+     "y": 856.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n11037319841"
+    },
+    {
+     "id": "osm:n3256321608",
+     "name": "München Süd",
+     "value": 22,
+     "x": 403.9,
+     "y": 786.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3256321608"
+    },
+    {
+     "id": "osm:n3489660893",
+     "name": "Toulon",
+     "value": 21,
+     "x": 300.9,
+     "y": 917.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3489660893"
+    },
+    {
+     "id": "osm:n7167504997",
+     "name": "Arras",
+     "value": 21,
+     "x": 243.2,
+     "y": 725.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n7167504997"
+    },
+    {
+     "id": "osm:n46122858",
+     "name": "Schiphol Airport",
+     "value": 21,
+     "x": 279.5,
+     "y": 666.5,
+     "href": "/gallery?tab=station&kind=via&a=osm:n46122858"
+    },
+    {
+     "id": "osm:n3784638270",
+     "name": "Gdańsk Główny",
+     "value": 21,
+     "x": 533.7,
+     "y": 603.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3784638270"
+    },
+    {
+     "id": "osm:n2931428598",
+     "name": "Offenburg",
+     "value": 21,
+     "x": 337.8,
+     "y": 776.7,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2931428598"
+    },
+    {
+     "id": "osm:w1022039965",
+     "name": "Aéroport Charles de Gaulle 2 TGV",
+     "value": 21,
+     "x": 239.4,
+     "y": 762.1,
+     "href": "/gallery?tab=station&kind=via&a=osm:w1022039965"
+    },
+    {
+     "id": "osm:n3080746010",
+     "name": "Basel Badischer Bahnhof",
+     "value": 21,
+     "x": 331.6,
+     "y": 801.6,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3080746010"
+    },
+    {
+     "id": "osm:n9635608905",
+     "name": "Milano Rogoredo",
+     "value": 21,
+     "x": 361.5,
+     "y": 858.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n9635608905"
+    },
+    {
+     "id": "osm:n4290857032",
+     "name": "Nancy",
+     "value": 21,
+     "x": 305.4,
+     "y": 770.8,
+     "href": "/gallery?tab=station&kind=via&a=osm:n4290857032"
+    },
+    {
+     "id": "osm:n3080746008",
+     "name": "Aarau",
+     "value": 21,
+     "x": 339.7,
+     "y": 806.4,
+     "href": "/gallery?tab=station&kind=via&a=osm:n3080746008"
+    },
+    {
+     "id": "osm:n44727803",
+     "name": "Arnhem Centraal",
+     "value": 21,
+     "x": 300.4,
+     "y": 676.2,
+     "href": "/gallery?tab=station&kind=via&a=osm:n44727803"
+    },
+    {
+     "id": "osm:n2323484867",
+     "name": "Slagelse",
+     "value": 21,
+     "x": 400.1,
+     "y": 570.3,
+     "href": "/gallery?tab=station&kind=via&a=osm:n2323484867"
+    }
+   ],
+   "labelled": [
+    "osm:n17401552",
+    "osm:w423692233",
+    "osm:n2158044594",
+    "osm:n2459919677",
+    "osm:n3856100103",
+    "osm:n25589138",
+    "osm:n4290854847",
+    "osm:n3069229440"
+   ]
+  }
+ },
+ "distance": {
+  "total_km": 2168529.5,
+  "equator_laps": 54.11177791640674,
+  "median_km": 1472.5,
+  "median_h": 15.7,
+  "longest": {
+   "name": "Sevilla - Santa Justa – Söğütlüçeşme",
+   "km": 9420.95,
+   "nights": 5
+  },
+  "shortest": {
+   "name": "Zagreb Glavni kolodvor – Zagreb Zapadni kolodvor",
+   "km": 2.1
+  },
+  "two_stop": 113,
+  "histogram": {
+   "labels": [
+    "0",
+    "500",
+    "1000",
+    "1500",
+    "2000",
+    "2500",
+    "3000+"
+   ],
+   "values": [
+    27,
+    198,
+    465,
+    336,
+    150,
+    72,
+    73
+   ],
+   "highlight": [
+    1,
+    2,
+    3
+   ]
+  }
+ },
+ "funnel": {
+  "typical": 924,
+  "typical_share": 0.6994700984102953,
+  "too_short": 27,
+  "too_long": 295,
+  "too_slow": 4,
+  "over_time": 315,
+  "under_time": 38,
+  "pairs": 531,
+  "corridors": 319,
+  "max_variants": 31,
+  "rows": [
+   {
+    "label": "Proposals published",
+    "value": 1321
+   },
+   {
+    "label": "Typical night trains",
+    "value": 924
+   },
+   {
+    "label": "Distinct city pairs",
+    "value": 531
+   },
+   {
+    "label": "Corridors",
+    "value": 319
+   }
+  ]
+ },
+ "agree": {
+  "top_pair": {
+   "label": "Paris – Praha",
+   "value": 15,
+   "authors": 12,
+   "min_via": 0,
+   "max_via": 24,
+   "href": "/gallery?tab=city&kind=fromTo&a=17807753&b=1601837931"
+  },
+  "duplicate_share": 0.4253246753246753,
+  "same_author_dups": 32,
+  "pairs": [
+   {
+    "label": "Paris – Praha",
+    "value": 15,
+    "authors": 12,
+    "min_via": 0,
+    "max_via": 24,
+    "href": "/gallery?tab=city&kind=fromTo&a=17807753&b=1601837931"
+   },
+   {
+    "label": "Malmö – Paris",
+    "value": 13,
+    "authors": 13,
+    "min_via": 2,
+    "max_via": 13,
+    "href": "/gallery?tab=city&kind=fromTo&a=26804505&b=17807753"
+   },
+   {
+    "label": "Barcelona – Zürich",
+    "value": 12,
+    "authors": 12,
+    "min_via": 3,
+    "max_via": 17,
+    "href": "/gallery?tab=city&kind=fromTo&a=152364165&b=240025182"
+   },
+   {
+    "label": "Madrid – Paris",
+    "value": 11,
+    "authors": 11,
+    "min_via": 0,
+    "max_via": 13,
+    "href": "/gallery?tab=city&kind=fromTo&a=21068295&b=17807753"
+   },
+   {
+    "label": "Barcelona – Frankfurt",
+    "value": 10,
+    "authors": 10,
+    "min_via": 0,
+    "max_via": 26,
+    "href": "/gallery?tab=city&kind=fromTo&a=152364165&b=27418664"
+   },
+   {
+    "label": "Tallinn – Vilnius",
+    "value": 10,
+    "authors": 10,
+    "min_via": 1,
+    "max_via": 7,
+    "href": "/gallery?tab=city&kind=fromTo&a=29787492&b=27193093"
+   },
+   {
+    "label": "Berlin – Oslo",
+    "value": 9,
+    "authors": 9,
+    "min_via": 3,
+    "max_via": 19,
+    "href": "/gallery?tab=city&kind=fromTo&a=240109189&b=20981158"
+   },
+   {
+    "label": "Amsterdam – Barcelona",
+    "value": 9,
+    "authors": 9,
+    "min_via": 2,
+    "max_via": 15,
+    "href": "/gallery?tab=city&kind=fromTo&a=268396336&b=152364165"
+   },
+   {
+    "label": "Barcelona – Milano",
+    "value": 8,
+    "authors": 6,
+    "min_via": 4,
+    "max_via": 18,
+    "href": "/gallery?tab=city&kind=fromTo&a=152364165&b=62505581"
+   },
+   {
+    "label": "Paris – Roma",
+    "value": 8,
+    "authors": 8,
+    "min_via": 0,
+    "max_via": 7,
+    "href": "/gallery?tab=city&kind=fromTo&a=17807753&b=72959652"
+   }
+  ]
+ },
+ "supply": {
+  "train_km": 427306830.0,
+  "departures": 327641.0,
+  "seat_km": 125679880573.0,
+  "trainsets": 1047.0,
+  "trainsets_nightly": 552.6202185792349,
+  "cost_median": 23.134999999999998,
+  "cost_histogram": {
+   "labels": [
+    "15",
+    "17.5",
+    "20",
+    "22.5",
+    "25",
+    "27.5",
+    "30",
+    "32.5+"
+   ],
+   "values": [
+    3,
+    104,
+    293,
+    212,
+    137,
+    46,
+    44,
+    85
+   ]
+  }
+ },
+ "composition": {
+  "default_id": "NEW-BAL-7",
+  "default_places": 260,
+  "default_coaches": 7,
+  "default_share": 0.8571428571428571,
+  "catalogue_size": 12,
+  "every_night_share": 0.08441558441558442,
+  "three_nights_share": 0.8885281385281385,
+  "rows": [
+   {
+    "label": "NEW-BAL-7",
+    "value": 792,
+    "share": 0.8571428571428571
+   },
+   {
+    "label": "REF-POD-7",
+    "value": 25,
+    "share": 0.027056277056277056
+   },
+   {
+    "label": "REF-PREM-12",
+    "value": 24,
+    "share": 0.025974025974025976
+   },
+   {
+    "label": "REF-BUD-6",
+    "value": 19,
+    "share": 0.020562770562770564
+   },
+   {
+    "label": "REF-COUCH-10",
+    "value": 17,
+    "share": 0.0183982683982684
+   },
+   {
+    "label": "other",
+    "value": 47,
+    "share": 0.050865800865800864
+   }
+  ]
+ },
+ "talk": {
+  "likes": 115,
+  "comments": 28,
+  "likers": 38,
+  "commenters": 17
+ },
+ "feedback": {
+  "total": 37,
+  "rows": [
+   {
+    "label": "Missing stop",
+    "value": 32
+   },
+   {
+    "label": "Routing / track geometry",
+    "value": 3
+   },
+   {
+    "label": "Documentation",
+    "value": 1
+   },
+   {
+    "label": "Feature request",
+    "value": 1
+   }
+  ],
+  "by_theme": {
+   "Missing stop": 32,
+   "Routing / track geometry": 3,
+   "Documentation": 1,
+   "Feature request": 1
+  }
+ },
+ "footer": {
+  "calculations": 7844,
+  "median_calculation_s": 3.662,
+  "server_errors": 1,
+  "mobile_share": 0.2988053674336432
+ }
+}

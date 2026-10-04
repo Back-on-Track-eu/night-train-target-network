@@ -14,9 +14,8 @@ decisions — [`../adapters/proposal/README.md`](../adapters/proposal/README.md)
 evaluation model, views & allocation —
 [`../models/evaluation/README.md`](../models/evaluation/README.md) · database
 schemas & versioning — [`../db/README.md`](../db/README.md) · integration tests
-per endpoint — [`../tests/README.md`](../tests/README.md) · frontend migration
-guide —
-[`../../docs/FRONTEND_API_HANDOVER_2026-08-07.md`](../../docs/FRONTEND_API_HANDOVER_2026-08-07.md)
+per endpoint — [`../tests/README.md`](../tests/README.md) · the TypeScript
+mirror of these shapes — [`frontend/src/types/api.ts`](../../frontend/src/types/api.ts)
 
 **Worked examples:** request fixtures for the main endpoints are checked
 in under [`../scripts/data/`](../scripts/data/); the matching
@@ -574,6 +573,28 @@ Sizes measured on Berlin–Wien, 6 × 12 (`scripts/bench_member.py`):
 summaries 72 × ~0.8 KB, compact routes 72 × ~3 KB, geometry 8 × ~150 KB —
 ≈1.5 MB raw, ≈400 KB gzipped (Flask-Compress applies).
 
+**Field notes a client needs** (collected from the frontend handovers,
+which this section replaces):
+
+* Every compact trip carries `general_parameters.track_gauge_mm` — the
+  gauge the route was built on (one of the five routing profiles, 1 520 and
+  1 524 being one family); a stop list that cannot be joined on one gauge
+  is `422 gauge_mismatch`.
+* The views' `revenue` block has three members — `ticket_revenue_eur`,
+  `services_revenue_eur` and the SIGNED `catering_contribution_eur`
+  (`places_sold × catering_eur_per_pax`, see the demand block of the
+  request) — and `total_eur`; the summary row carries
+  `catering_contribution_eur` as well.
+* Station calls in `operations` carry `per_tonne {eur_per_t, train_mass_t}`
+  where a country charges per tonne (Czechia today), the counterpart of the
+  catalog's `stop_charge_eur.per_tonne_eur` (`GET /api/params/stop_infrastructures`).
+* Every cost row of a view maps to one documentation page,
+  `/docs/cost/<slug>` — the slug contract is `frontend/src/lib/factorFeedback.ts`
+  on one side and `scripts/model_docs/render_site.py::cost_slug` on the other.
+* `co2_savings_t_per_year` and `subsidy_eur_per_t_co2` (summary row, gallery
+  sorts and ranges) are **CO₂-equivalent** tonnes despite the short names
+  (EMISSIONS 0.2.0: well-to-wheel, non-CO₂ aviation effects included).
+
 </details>
 
 ---
@@ -881,6 +902,7 @@ doesn't run its query at all.
 | `demand_kpis_placeholder` | `demand_kpis_placeholder` | list (OR) | `[bool, ...]` |
 | `countries` | `countries` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
 | `stop_ids` | `stop_ids` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
+| `cities` | — (resolved through `input_params.stop_infrastructures.city_osm_id`) | any/all | `[int, ...]` OSM place-node ids, or `{"values": [...], "mode": "any"\|"all"}` — a row matches when one of its `stop_ids` lies in the city; `"all"` = every listed city touched (backend 0.5.15) |
 | `name` | `name` | substring | case-insensitive `str` |
 | `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same, **one direction** (see below) | range | `{"min": num, "max": num}` |
 

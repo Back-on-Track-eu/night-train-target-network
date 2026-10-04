@@ -1259,7 +1259,7 @@ class TestCateringContribution:
 
 
 # =============================================================================
-# Overhead and margin reach the per-trip-pair view (handover §6.4)
+# Overhead and margin reach the per-trip-pair view (Details card, Overhead tab)
 # =============================================================================
 
 
@@ -1597,7 +1597,7 @@ class TestThreePartTariff:
 
 
 # =============================================================================
-# Operations — the infrastructure block (handover §6.5)
+# Operations — the infrastructure block (Details card, Infrastructure tab)
 # =============================================================================
 
 

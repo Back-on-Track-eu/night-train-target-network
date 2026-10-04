@@ -3,6 +3,14 @@ import type { Theme } from 'vitepress'
 import Layout from './Layout.vue'
 import FeedbackForm from './components/FeedbackForm.vue'
 import GeneralFeedbackForm from './components/GeneralFeedbackForm.vue'
+import ReportCard from './components/ReportCard.vue'
+import ReportTiles from './components/ReportTiles.vue'
+import ReportBars from './components/ReportBars.vue'
+import ReportMap from './components/ReportMap.vue'
+import ReportQuotes from './components/ReportQuotes.vue'
+import ReportChips from './components/ReportChips.vue'
+import ChangelogEntry from './components/ChangelogEntry.vue'
+import ActionDock from './components/ActionDock.vue'
 import 'katex/dist/katex.min.css'
 import './custom.css'
 
@@ -15,6 +23,11 @@ import './custom.css'
 // same way rather than imported there: a markdown file importing from
 // ./.vitepress/theme/components/ is a path that breaks the moment the page
 // moves into a folder.
+//
+// The Report* components, ChangelogEntry and ActionDock are the building
+// blocks of the report and product-update pages (reports/, updates/ —
+// see reports/README.md). Global for the same reason: those pages live in
+// folders and are written as markdown around the tags.
 //
 // Layout extends the default one with the Back-on-Track masthead; custom.css
 // carries the brand tokens. Neither touches page content.
@@ -31,5 +44,13 @@ export default {
   enhanceApp({ app }) {
     app.component('FeedbackForm', FeedbackForm)
     app.component('GeneralFeedbackForm', GeneralFeedbackForm)
+    app.component('ReportCard', ReportCard)
+    app.component('ReportTiles', ReportTiles)
+    app.component('ReportBars', ReportBars)
+    app.component('ReportMap', ReportMap)
+    app.component('ReportQuotes', ReportQuotes)
+    app.component('ReportChips', ReportChips)
+    app.component('ChangelogEntry', ChangelogEntry)
+    app.component('ActionDock', ActionDock)
   },
 } satisfies Theme
