@@ -22,6 +22,7 @@ from tests.helpers import (
     PROPOSALS_URL,
     comment_url,
     compute,
+    half_like_postgres,
     like_url,
     publish,
     purge_saved_proposals,
@@ -155,6 +156,15 @@ def _row_keys(summary_rows) -> list[tuple]:
     ]
 
 
+def _coordinates(geometry) -> list:
+    """Every [lon, lat] of a (Multi)LineString GeoJSON geometry; [] for None."""
+    if geometry is None:
+        return []
+    if geometry["type"] == "LineString":
+        return geometry["coordinates"]
+    return [pt for line in geometry["coordinates"] for pt in line]
+
+
 def _route_keys(map_routes_features) -> list[tuple]:
     """The same identity, read off map_routes features."""
     return [
@@ -196,6 +206,37 @@ class TestFilterKinds:
 
         miss = _gallery(api_base, filter={"total_distance_km": {"max": km - 1}})
         assert published["proposal_id"] not in _proposal_ids(miss)
+
+    def test_gallery_distance_and_time_are_one_way(
+        self, api_base, db_cur, published, existing_routes
+    ):
+        """The stored summary sums both trips of the pair (a cycle, what the
+        supply figures are built on); the gallery lists ONE direction, like
+        the ONTD side does — half the stored figure, avg speed untouched.
+        An existing row's figures pass through unchanged."""
+        db_cur.execute(
+            "SELECT total_distance_km, total_time_h, avg_speed_kmh "
+            "FROM proposals.proposal_summaries WHERE proposal_id = %s",
+            (published["proposal_id"],),
+        )
+        stored = db_cur.fetchone()
+        row = _gallery(api_base, filter={"proposal_ids": [published["proposal_id"]]})[
+            "summaries"
+        ]["proposals"][0]
+        assert row["total_distance_km"] == half_like_postgres(
+            stored["total_distance_km"], 1
+        )
+        assert row["total_time_h"] == half_like_postgres(stored["total_time_h"], 2)
+        assert row["avg_speed_kmh"] == float(stored["avg_speed_kmh"])
+
+        existing = {
+            r["route_id"]: r
+            for r in _gallery(api_base, filter={"sources": ["existing"]}, limit=500)[
+                "summaries"
+            ]["proposals"]
+        }
+        assert existing[_EXISTING_ROUTE_IDS[0]]["total_distance_km"] == 700.0
+        assert existing[_EXISTING_ROUTE_IDS[0]]["total_time_h"] == 9.5
 
     def test_list_filter_composition_ids(self, api_base, published):
         hit = _gallery(api_base, filter={"composition_ids": [_COMPOSITION]})
@@ -401,6 +442,46 @@ class TestSourceUnion:
             filter={"margin_eur_per_train_km": {"min": -1_000_000}},
         )
         assert all(r["source"] == "proposal" for r in body["summaries"]["proposals"])
+
+    def test_scoped_range_lets_existing_rows_through(
+        self, api_base, existing_routes, published
+    ):
+        """A range with scope "proposal" is asked of proposals only: the
+        fake existing rows (74 and 97 km/h) stay listed under a bound no
+        existing row meets, and so does one with NULL in the column —
+        while the proposal side is still sieved. The unscoped form of the
+        same range drops them (test_financial_filter_excludes_existing
+        pins the NULL case; this pins the non-NULL one)."""
+        unscoped = _gallery(api_base, filter={"avg_speed_kmh": {"min": 500}})
+        assert unscoped["summaries"]["proposals"] == []
+
+        scoped = _gallery(
+            api_base,
+            filter={"avg_speed_kmh": {"min": 500, "scope": "proposal"}},
+            limit=500,
+        )
+        rows = scoped["summaries"]["proposals"]
+        assert {r["source"] for r in rows} == {"existing"}
+        assert set(_EXISTING_ROUTE_IDS) <= {r["route_id"] for r in rows}
+
+        # NULL on the existing side passes too: margin is NULL on every
+        # existing row, and the scope makes that irrelevant.
+        body = _gallery(
+            api_base,
+            filter={
+                "margin_eur_per_train_km": {"min": -1_000_000, "scope": "proposal"}
+            },
+            limit=500,
+        )
+        assert {r["source"] for r in body["summaries"]["proposals"]} >= {"existing"}
+
+    def test_unknown_range_scope_rejected(self, api_base):
+        resp = requests.post(
+            f"{api_base}{PROPOSALS_URL}",
+            json={"filter": {"avg_speed_kmh": {"min": 60, "scope": "existing"}}},
+            timeout=15,
+        )
+        assert resp.status_code == 400
 
     def test_stop_ids_filter_spans_sources(self, api_base, existing_routes, published):
         """stop_ids is a shared Target Network namespace (step 6a) —
@@ -734,6 +815,22 @@ class TestIncludeSections:
                 "MultiLineString",
             )
 
+    def test_map_geometry_is_thinned_for_the_wire(self, api_base, published):
+        """Both map sections write at most GALLERY_GEOJSON_DECIMALS (5)
+        decimals per coordinate, and the card route is simplified on read
+        rather than shipped at its stored ~50 m resolution (production
+        2026-10-03: 4.3 MB for one 20-card page before this)."""
+        body = _gallery(
+            api_base,
+            filter={"user_ids": [published["user_id"]]},
+            include=["map_lines", "map_routes"],
+        )
+        features = body["map_lines"]["features"] + body["map_routes"]["features"]
+        assert features
+        for feature in features:
+            for x, y in _coordinates(feature["geometry"]):
+                assert round(x, 5) == x and round(y, 5) == y
+
     def test_multiple_sections_together(self, api_base):
         body = _gallery(api_base, include=["summaries", "map_country_counts"])
         assert set(body) == {"summaries", "map_country_counts"}
@@ -745,6 +842,98 @@ class TestIncludeSections:
             timeout=15,
         )
         assert resp.status_code == 400
+
+
+# =============================================================================
+# distributions — fixed-width histograms per measure, each counted on the
+# filter minus its own range (the gallery's range handles sit on them)
+# =============================================================================
+
+
+_DISTRIBUTION_KEYS = {"total_distance_km", "total_time_h", "avg_speed_kmh", "n_stops"}
+
+
+def _bin_totals(measure: dict) -> tuple[int, int]:
+    """(proposals, existing) summed over the bins and the unknown bucket."""
+    bins = measure["bins"] + [measure["unknown"]]
+    return sum(b["n_proposals"] for b in bins), sum(b["n_existing"] for b in bins)
+
+
+class TestDistributions:
+    def test_axes_are_fixed_and_the_last_bin_open(self, api_base, published):
+        body = _gallery(api_base, include=["distributions"])
+        assert set(body) == {"distributions"}
+        dists = body["distributions"]
+        assert set(dists) == _DISTRIBUTION_KEYS
+        for measure in dists.values():
+            bins = measure["bins"]
+            n = round((measure["top"] - measure["origin"]) / measure["bin_width"])
+            assert len(bins) == n + 1
+            assert bins[0]["from"] == measure["origin"]
+            assert bins[-1] == {
+                "from": measure["top"],
+                "to": None,
+                "n_proposals": bins[-1]["n_proposals"],
+                "n_existing": bins[-1]["n_existing"],
+            }
+            for a, b in zip(bins, bins[1:]):
+                assert a["to"] == b["from"]
+                assert a["to"] - a["from"] == pytest.approx(measure["bin_width"])
+
+    def test_bins_account_for_every_row(self, api_base, existing_routes, published):
+        """Bins plus the unknown bucket sum to the filtered total, per
+        source — nothing falls between the bins or off the open end."""
+        body = _gallery(api_base, include=["summaries", "distributions"], limit=500)
+        rows = body["summaries"]["proposals"]
+        n_proposals = sum(r["source"] == "proposal" for r in rows)
+        n_existing = sum(r["source"] == "existing" for r in rows)
+        assert body["summaries"]["total"] == len(rows)
+        for measure in body["distributions"].values():
+            assert _bin_totals(measure) == (n_proposals, n_existing)
+
+    def test_the_published_proposal_lands_in_its_one_way_bin(self, api_base, published):
+        row = _summary_row(api_base, published)
+        body = _gallery(
+            api_base,
+            filter={"proposal_ids": [published["proposal_id"]]},
+            include=["distributions"],
+        )
+        for key, value in (
+            ("total_distance_km", row["total_distance_km"]),
+            ("total_time_h", row["total_time_h"]),
+            ("avg_speed_kmh", row["avg_speed_kmh"]),
+            ("n_stops", row["n_stops"]),
+        ):
+            measure = body["distributions"][key]
+            hit = [
+                b
+                for b in measure["bins"]
+                if b["from"] <= value and (b["to"] is None or value < b["to"])
+            ]
+            assert len(hit) == 1, key
+            assert hit[0]["n_proposals"] == 1, key
+            assert _bin_totals(measure) == (1, 0)
+
+    def test_each_measure_ignores_its_own_range(
+        self, api_base, existing_routes, published
+    ):
+        """A distance range that drops every proposal still leaves the
+        distance histogram whole (that is the range the handles move on),
+        while every other measure's histogram reflects it; the scoped
+        form keeps the existing side intact everywhere."""
+        empty = {"min": 100_000, "scope": "proposal"}
+        full = _gallery(api_base, include=["distributions"])["distributions"]
+        sieved = _gallery(
+            api_base,
+            filter={"total_distance_km": empty},
+            include=["distributions"],
+        )["distributions"]
+
+        assert sieved["total_distance_km"] == full["total_distance_km"]
+        for key in _DISTRIBUTION_KEYS - {"total_distance_km"}:
+            n_proposals, n_existing = _bin_totals(sieved[key])
+            assert n_proposals == 0, key
+            assert n_existing == _bin_totals(full[key])[1], key
 
 
 # =============================================================================

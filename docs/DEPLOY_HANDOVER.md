@@ -1676,6 +1676,120 @@ script runs.
 
 ---
 
+## 22. Gallery loading — backend 0.5.10, no migration (2026-10-03)
+
+Production timed out on the unfiltered gallery (1,334 proposals, 205
+existing): `map_lines` took 31 s / 8.8 MB and `map_routes` 6 s / 4.3 MB per
+20-card page, inside one request with a 15 s client deadline. Phase 1 —
+image rebuild of api and frontend, nothing else:
+
+- `map_routes` and `map_lines` geometry is thinned on read (≈200 m, 5
+  decimals). No stored value changes, no backfill.
+- The frontend asks for `map_lines` in its own request, apart from the
+  cards, with no client deadline. Expect two `POST /api/proposals` on a cold
+  gallery load: `["summaries", "map_routes"]` and `["map_lines"]`.
+
+Phase 1 alone leaves `map_lines` the 31 s query, off the critical path;
+§23 below is what makes it fast. Stops applying together with §23.
+
+---
+
+## 23. Gallery corridors precomputed + the data-task runner — backend 0.5.11, migration 2026-10-03
+
+**What changes.** `proposals.proposal_corridors` (adapters/proposal/README.md
+§5.4b) holds the gallery's corridor pieces, written with every publish and
+refresh. `map_lines` reads it and drops from 31 s to well under a second —
+once every proposal has rows. Proposals published before this deploy get
+theirs from a **data task**, the new second half of the database pipeline:
+`db/run_tasks.py` runs Python batch operations from `db/tasks/`, recorded in
+`admin.data_task_runs`, the way `db/migrate.py` runs SQL migrations recorded
+in `admin.schema_migrations` (db/README.md "Data tasks").
+
+**Deploy, both environments — nothing by hand:**
+
+1. `migrate` applies `2026-10-03_proposal_corridors.sql` (a new table, nothing
+   existing touched; seconds).
+2. The api starts. Until step 3 is through, `map_lines` logs
+   `proposal_corridors incomplete — deriving at request time` and answers as
+   before (slow, correct).
+3. The new one-shot `data-tasks` (`deploy/coolify/app.docker-compose.yml`)
+   runs after `migrate`, beside the api: it runs
+   `2026-10-03_backfill_proposal_corridors.py` — pure SQL over stored data,
+   no routing, about a minute for 1,334 proposals — and exits 0. From then
+   on `map_lines` takes the fast path, no api restart needed.
+
+**Verify.** On the box, `docker compose … run --rm data-tasks python
+db/run_tasks.py --list` shows the task `done` with a summary like
+`28372 corridor rows written for 1334 proposal(s)`; then the timing loop from
+docs/2026-10-03_gallery_loading_phase1_manifest.md against
+`include: ["map_lines"]` — expect < 1 s. In the database:
+
+```sql
+SELECT status, finished_at, summary FROM admin.data_task_runs ORDER BY run_id DESC;
+SELECT count(*), count(DISTINCT proposal_id) FROM proposals.proposal_corridors;
+```
+
+**If a task fails,** Coolify shows `data-tasks` exited non-zero and the row
+says `failed` with the exception; the task stays pending and the next deploy
+retries it. To retry without a deploy:
+`docker compose … run --rm data-tasks python db/run_tasks.py`, or
+`--run 2026-10-03_backfill_proposal_corridors.py` to force one task.
+
+**From now on** every bulk operation on stored data ships as a task file,
+version-bump re-projections included (recipe in db/README.md), instead of a
+hand-run `refresh_proposals.py` — the compose one-shot runs it on the deploy
+that carries it, and the run table says when it ran where. The request-time
+fallback in `map_lines` (`_map_lines_derived()`) stops applying once staging
+and production both show the task `done`; delete it then.
+
+**Dev stacks:** the table is in `create_proposal_schema.sql`;
+`docker/entrypoint.sh` now runs `migrate.py --baseline` after the seed and
+the task runner in the background, so `admin.schema_migrations` and
+`admin.data_task_runs` exist and are current on a laptop too.
+
+---
+
+## 24a. Gallery distribution panel — backend 0.5.14, no migration (2026-10-04)
+
+`POST /api/proposals` gains an `include` section, `distributions` (four
+`width_bucket` aggregates over the gallery union, no geometry). Rebuild
+the api and frontend images; nothing to configure, no data task, no
+schema change. The gallery now sends three requests per query (cards,
+corridors, histograms). Stops applying once 0.5.14 is on production.
+
+## 24. Frontend cache headers — frontend image rebuild only (2026-10-04)
+
+**Symptom on staging after #74:** typing the site URL showed the previous
+release; only a reload of the page brought the new one. The frontend's
+nginx sent no `Cache-Control`, so browsers applied heuristic freshness to
+`index.html` (about a tenth of its age since `Last-Modified`), reused the
+cached copy on an address-bar visit, and that copy still named the old
+bundle's hashed files. Caddy adds nothing of its own, so this is purely
+`frontend/nginx.conf`:
+
+- default `Cache-Control: no-cache` — every navigation revalidates;
+  nginx's ETag makes that a 304, not a transfer;
+- `/assets/*` and `/docs/assets/*` (content-hashed by Vite and VitePress)
+  `public, max-age=31536000, immutable`.
+
+**Deploy:** nothing to configure; the file is baked into the frontend image
+and a normal Coolify deploy rebuilds it. **Verify** on the edge host:
+
+```
+curl -sI https://staging.targetnetwork.back-on-track.eu/gallery | grep -i cache-control      # no-cache
+curl -sI https://staging.targetnetwork.back-on-track.eu/assets/<index-*.js> | grep -i cache-control   # immutable
+```
+
+Users who still have the old `index.html` cached see the fix only after
+their next revalidation — the age-based heuristic bounds that to days at
+most; a reload ends it immediately.
+
+**Stops applying** once the headers are on production; the rule itself is
+documented in `frontend/nginx.conf` and frontend/README.md "Production
+image". Delete this section then.
+
+---
+
 ## Maintaining this document
 
 One file, updated in the same PR as the change it describes. The rule that

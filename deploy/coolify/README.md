@@ -44,7 +44,10 @@ docker compose -p $P -f deploy/coolify/app.docker-compose.yml run --rm --no-deps
   sh -c "python scripts/export_country_geoms.py && python db/dev/seed.py"
 docker compose -p $P -f deploy/coolify/app.docker-compose.yml run --rm migrate python db/migrate.py --baseline
 docker compose -p $P -f deploy/coolify/app.docker-compose.yml run --rm migrate python db/migrate.py --check
+docker compose -p $P -f deploy/coolify/app.docker-compose.yml run --rm data-tasks python db/run_tasks.py --baseline
 ```
+(`--baseline` for the data tasks too: a fresh seed's rows were all written by code
+that already produces what the tasks backfill, so there is nothing for them to do.)
 then redeploy so `ontd-bootstrap` and `country-relations` run. Gate codes: copy `admin.access_codes` +
 `admin.access_code_redemptions` from bot-server staging (data-only dump) if the same codes must work.
 
@@ -67,7 +70,7 @@ not the vanity host), optional `GUNICORN_WORKERS` (default 4), `GUNICORN_THREADS
   has a `${VAR:-default}`; required secrets use `${VAR:?…}` so a missing secret fails loudly.
 - Only `edge` gets a Coolify domain (port 80). Traefik does TLS + host; Caddy inside does the
   gate. Do **not** put domains on `api` or `frontend`, that would bypass the gate.
-- One-shots (`migrate`, `ontd-bootstrap`, `country-relations`) exit 0 by design; Coolify shows
+- One-shots (`migrate`, `data-tasks`, `ontd-bootstrap`, `country-relations`) exit 0 by design; Coolify shows
   them as exited, that is expected.
 
 ## Data migration from bot-server (production cut-over)

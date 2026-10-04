@@ -38,6 +38,43 @@ export function fetchProposals(
 }
 
 /**
+ * The gallery's corridor overview on its own: `map_lines` for the whole
+ * filtered set. Split off the list request because its cost grows with the
+ * catalogue while a list page does not, so it gets the 'heavy' budget (no
+ * deadline, see apiClient's header) instead of the interactive one — a slow
+ * overview can no longer time out the cards. Cancel it through `signal`.
+ */
+export function fetchMapCorridors(
+  body: Pick<ProposalsRequest, 'filter' | 'scenario_variant_id'>,
+  signal?: AbortSignal,
+): Promise<ProposalsResponse> {
+  return apiRequest<ProposalsResponse>('/api/proposals', {
+    method: 'POST',
+    body: { ...body, include: ['map_lines'] },
+    budget: 'heavy',
+    ...(signal ? { signal } : {}),
+  })
+}
+
+/**
+ * The gallery's histograms (`distributions` section) for a query: how the
+ * filtered set spreads over distance, duration, speed and stops, each counted
+ * without its own range. Its own request like the corridors, so the panel
+ * can show a loading state apart from the cards; cheap (four aggregates, no
+ * geometry), so the interactive budget applies.
+ */
+export function fetchDistributions(
+  body: Pick<ProposalsRequest, 'filter' | 'scenario_variant_id'>,
+  signal?: AbortSignal,
+): Promise<ProposalsResponse> {
+  return apiRequest<ProposalsResponse>('/api/proposals', {
+    method: 'POST',
+    body: { ...body, include: ['distributions'] },
+    ...(signal ? { signal } : {}),
+  })
+}
+
+/**
  * One proposal's current version (route + evaluation + metadata) — same wire
  * shape as publish's response. Used by ProposalViewport to open a stored
  * proposal; it needs the full route.

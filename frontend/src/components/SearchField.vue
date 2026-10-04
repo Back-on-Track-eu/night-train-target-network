@@ -8,9 +8,10 @@ import AppIcon from '@/components/AppIcon.vue'
 // trigger is the surrounding element — hence the @click.stop on the clear
 // button, which would otherwise open the picker it just cleared.
 //
-// Fixed width, so picking a long station name no longer resizes the field and
-// with it the whole pill; `group` so the hover target is the field's full box
-// rather than just the glyphs of the name sitting in it.
+// Fixed width from sm up, so picking a long station name no longer resizes the
+// field and with it the whole pill; on a phone the pill is a column and the
+// field takes its full width instead. `group` so the hover target is the
+// field's full box rather than just the glyphs of the name sitting in it.
 defineProps<{
   label: string
   /** The chosen value's display name, or null when nothing is picked yet. */
@@ -24,7 +25,7 @@ const { t } = useI18n()
 
 <template>
   <div
-    class="group flex w-48 flex-col rounded-full px-4 py-1.5 transition-colors hover:bg-primary-50/10"
+    class="group flex w-full flex-col rounded-full px-4 py-1.5 transition-colors hover:bg-primary-50/10 sm:w-48"
   >
     <span class="text-xs font-semibold text-primary-50">{{ label }}</span>
     <span class="flex items-center gap-1">

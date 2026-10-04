@@ -36,7 +36,10 @@ onMounted(() => {
   <div class="flex min-h-screen flex-col bg-sapphire">
     <AppHeader />
     <ApiStatusBanner />
-    <div class="flex flex-1 flex-col items-center px-8 py-12">
+    <!-- The page gutter: a phone gets the 16px a native layout would, wider
+         screens the roomier 32px. Gallery.vue's -mb-6 trims the vertical
+         padding, so py-12 is load-bearing there. -->
+    <div class="flex flex-1 flex-col items-center px-4 py-12 sm:px-8">
       <div v-if="showPageHeading" class="mb-10 flex flex-col items-center gap-3">
         <h1 class="text-center text-4xl font-light text-white">{{ t('proposal.heading') }}</h1>
         <!-- max-w-2xl: the sub-line is the page's only full sentence, and it

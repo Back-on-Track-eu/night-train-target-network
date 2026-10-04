@@ -882,7 +882,25 @@ doesn't run its query at all.
 | `countries` | `countries` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
 | `stop_ids` | `stop_ids` (`TEXT[]`) | array, any/all | `[str, ...]` or `{"values": [...], "mode": "any"\|"all"}` |
 | `name` | `name` | substring | case-insensitive `str` |
-| `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same | range | `{"min": num, "max": num}` |
+| `total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` | same, **one direction** (see below) | range | `{"min": num, "max": num}` |
+
+`total_distance_km` and `total_time_h` are **one way** in every gallery row
+and every gallery filter, sort and statistic — the proposal side is halved
+in the union (`repository.py` `_GALLERY_PROPOSAL_BRANCH`), because the
+stored summary sums both trips of the pair (a cycle: what `train_km_per_year`
+and the supply figures are built on; the builder's own KPIs halve it in
+`lib/compareKpis.ts`), while the ONTD side is per direction. `GET
+/api/proposal/<id>` and the family responses still carry the cycle in
+`evaluation.summary`. `avg_speed_kmh` is a ratio and is the same either way.
+
+Every range (numeric and datetime) also takes `"scope": "proposal"`: the
+bounds are then asked of proposal rows **only** and every existing (ONTD)
+row passes unexamined — `(source <> 'proposal' OR (col >= … AND col <= …))`.
+Without it a range applies to both sources and an existing row with no
+figure (NULL) drops out. The gallery's "typical night train" sieve uses the
+scoped form so the real trains stay in view as the comparison. Any other
+scope value is a `400 validation_error`.
+
 | `cost_eur_per_train_km`, `revenue_eur_per_train_km`, `margin_eur_per_train_km`, `subsidy_eur_per_year` | same | range | `{"min": num, "max": num}` |
 | `demand_trips_per_year`, `demand_trip_km_per_year`, `shift_air_trips_per_year`, `shift_air_trip_km_per_year`, `shift_other_trips_per_year`, `shift_other_trip_km_per_year`, `co2_savings_t_per_year`, `subsidy_eur_per_t_co2` | same | range | `{"min": num, "max": num}` |
 | `likes_count`, `comments_count` | live-joined from `proposals.likes` / `proposals.comments` | range | `{"min": num, "max": num}` |
@@ -941,8 +959,8 @@ every entry. Times are wall-clock `"HH:MM"` with an optional integer
 
 `include` defaults to `["summaries"]` if omitted. `limit`/`offset` only
 apply to the `summaries` section — `map_lines`/`map_stop_counts`/
-`map_country_counts` always reflect the full filtered set (the map isn't
-paginated).
+`map_country_counts`/`distributions` always reflect the full filtered set
+(the map isn't paginated).
 
 ```json
 {
@@ -986,7 +1004,8 @@ paginated).
   "sort":    [{ "by": "likes_count", "dir": "desc" }],
   "limit":   50,
   "offset":  0,
-  "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts"]
+  "include": ["summaries", "map_lines", "map_stop_counts", "map_country_counts",
+              "distributions"]
 }
 ```
 
@@ -1062,6 +1081,20 @@ paginated).
         "properties": { "country": "DE", "n_proposals": 4, "n_existing": 2, "n": 6 }
       }
     ]
+  },
+  "distributions": {
+    "total_distance_km": {
+      "origin": 0, "top": 4000, "bin_width": 100,
+      "bins": [
+        { "from": 0, "to": 100, "n_proposals": 3, "n_existing": 0 },
+        { "...": "40 bins of 100 km" },
+        { "from": 4000, "to": null, "n_proposals": 12, "n_existing": 0 }
+      ],
+      "unknown": { "n_proposals": 0, "n_existing": 27 }
+    },
+    "total_time_h": { "...": "0–48 h in 1 h bins" },
+    "avg_speed_kmh": { "...": "0–160 km/h in 5 km/h bins" },
+    "n_stops": { "...": "2–26 in bins of one" }
   }
 }
 ```
@@ -1138,7 +1171,14 @@ features carry `proposal_count` / `existing_count` / `total_count` plus
 `avg_margin_eur_per_train_km` is the mean across the corridor's
 proposals only (`null` on corridors served exclusively by existing
 trains). Corridor geometry prefers a proposal shape and falls back to
-the existing route's own. `map_country_counts` is one feature per
+the existing route's own. Both line sections (`map_lines`, `map_routes`)
+are thinned for the wire: simplified at ~200 m and written at 5 decimals
+(~1 m) — see adapters/proposal/README.md §7.1. `map_lines` aggregates the
+whole filtered set; since backend 0.5.11 its proposal side reads the
+precomputed `proposals.proposal_corridors` (§5.4b) and falls back to
+deriving corridors at request time while any proposal still lacks its
+rows (the window before the deploy's data task has run). The gallery
+requests the section on its own, apart from the paginated list. `map_country_counts` is one feature per
 country touched by the filtered set, carrying the country's own border
 geometry (`input_params.countries.country_geom`) so the frontend
 doesn't need a second lookup for the choropleth — `geometry: null` for
@@ -1149,9 +1189,19 @@ joined to the *current base* scenario's pinned `stop_infrastructures`
 snapshot for coordinates — ONTD stops that kept raw (unmapped) ids
 don't join the catalog and get no marker.
 
+`distributions` (backend 0.5.14) feeds the gallery's histogram panel: for
+each of the four shared measures, counts per fixed-width bin and per
+source, plus an `unknown` bucket for rows with no value (existing trains
+without figures). The axes are constants (`adapters/proposal/README.md`
+§7.1), the last bin is open (`to: null`), and **each measure is counted
+on the filter minus its own range** — so the chart a pair of range
+handles sits on shows what that one range keeps or drops of the set the
+other filters leave, and a range with `scope: "proposal"` leaves the
+existing side of every histogram whole.
+
 **Errors:** `400 validation_error` for an unknown filter/sort/include key,
 a malformed range/list/array-mode/trip_windows/bbox shape, an unknown
-`sources` value, or an empty `sources` list.
+range `scope`, an unknown `sources` value, or an empty `sources` list.
 
 </details>
 

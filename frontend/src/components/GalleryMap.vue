@@ -25,6 +25,7 @@ import {
   type CorridorKind,
   type GalleryRowRef,
 } from '@/lib/galleryMap'
+import AppSpinner from '@/components/AppSpinner.vue'
 import type { MapLinesSection, MapRouteFeature } from '@/types/api'
 
 // Two layers, two grains, one map:
@@ -59,11 +60,16 @@ const ROUTE_LAYER_DASHED = 'gallery-route-line-dashed'
 
 const props = defineProps<{
   corridors: MapLinesSection | null
+  /** The overview's own request, loaded apart from the cards (Gallery.vue's
+   *  loadCorridors): 'loading' and 'failed' get a chip on the map. */
+  corridorsStatus?: 'idle' | 'loading' | 'failed'
   /** Routes for the rows currently listed, accumulated page by page. */
   routes: MapRouteFeature[]
   /** The row whose card is hovered — its route gets isolated and framed. */
   highlightedRow?: GalleryRowRef | null
 }>()
+
+const emit = defineEmits<{ 'retry-corridors': [] }>()
 
 const { t } = useI18n()
 const mapContainer = ref<HTMLDivElement | null>(null)
@@ -121,10 +127,12 @@ function sync() {
   if (!map || !mapLoaded) return
   const source = map.getSource(CORRIDORS_SOURCE) as maplibregl.GeoJSONSource | undefined
   source?.setData(props.corridors ?? EMPTY_CORRIDORS)
-  // Features are being replaced — drop any isolation so a departed route
-  // cannot leave the corridors permanently hidden.
+  // The corridors load apart from the cards, so they can land while a card is
+  // hovered: keep that route isolated and framed — the new corridors appear on
+  // mouseleave. Otherwise drop any isolation (applyHighlight(null) refits), so
+  // a departed route cannot leave the corridors permanently hidden.
+  if (routeForRow(props.routes, props.highlightedRow ?? null)) return
   applyHighlight(null)
-  fitAll()
 }
 
 function initLayers() {
@@ -240,6 +248,28 @@ onUnmounted(() => {
        so a min-height here would fight that budget on short viewports. -->
   <div class="relative h-full w-full">
     <div ref="mapContainer" class="h-full w-full overflow-hidden rounded-xl" />
+    <!-- The corridor overview loads after the cards; say so on the map itself
+         rather than in the card column, which is already usable. -->
+    <div
+      v-if="corridorsStatus === 'loading' || corridorsStatus === 'failed'"
+      class="bg-surface-0/90 absolute top-3 left-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs shadow-md backdrop-blur-sm"
+      role="status"
+    >
+      <template v-if="corridorsStatus === 'loading'">
+        <AppSpinner :size="12" />
+        <span class="text-surface-700">{{ t('gallery.map.loading') }}</span>
+      </template>
+      <template v-else>
+        <span class="text-surface-700">{{ t('gallery.map.failed') }}</span>
+        <button
+          type="button"
+          class="cursor-pointer font-semibold text-surface-900 underline underline-offset-2"
+          @click="emit('retry-corridors')"
+        >
+          {{ t('errors.retry') }}
+        </button>
+      </template>
+    </div>
     <!-- Without this the "already served" signal reads as an arbitrary palette. -->
     <div
       class="bg-surface-0/90 absolute bottom-3 left-3 rounded-lg px-3 py-2 text-xs shadow-md backdrop-blur-sm"

@@ -42,6 +42,7 @@ import 'primeicons/primeicons.css'
 import '@mdi/font/css/materialdesignicons.css'
 import { i18n } from './i18n'
 import { router } from './router'
+import { startFreshBuildWatch } from './composables/useFreshBuild'
 import App from './App.vue'
 import './style.css'
 // Must run before any map is constructed — see lib/maplibreWorker.ts. Imported
@@ -68,3 +69,7 @@ app.use(PrimeVue, {
 app.use(i18n)
 
 app.mount('#app')
+
+// After mount: the watch reads the document's own entry bundle and the
+// router's current route — see composables/useFreshBuild.ts.
+startFreshBuildWatch(router)

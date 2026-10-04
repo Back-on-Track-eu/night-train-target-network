@@ -52,6 +52,33 @@ npm install
 npm run dev
 ```
 
+### Production image
+
+`Dockerfile.demo` builds the bundle and the docs site and serves both from
+nginx with `nginx.conf`. Two cache rules live there: everything under
+`assets/` (content-hashed by Vite and VitePress) is `immutable` for a year,
+everything else — `index.html` first of all — is `no-cache`, i.e.
+revalidated on every navigation (a 304 on the ETag). Without the second
+rule a browser may reuse a heuristically "fresh" `index.html` after a
+deploy and keep running the previous bundle until the user forces a
+reload. A change to `nginx.conf` ships with the next frontend image build.
+
+**Staying on the current build** (`composables/useFreshBuild.ts`, helpers
+in `lib/freshBuild.ts`). The headers above decide what a browser does on
+its next page load; a tab that stays open across a deploy never makes one.
+So the app checks for itself: shortly after boot, whenever the tab becomes
+visible again and every ten minutes (at most once a minute) it fetches
+`/index.html` with `cache: 'no-store'` and compares the `index-*.js` it
+names with the one that booted the page. A different name means a deploy
+happened — or the browser served a stale `index.html` — and the tab is
+stale. On the gallery it reloads right away (everything it shows is in the
+URL; it waits only while the reader is typing in a field). Anywhere else it
+reloads right after the next navigation to the gallery, which lands on the
+new build at that URL — never inside the builder or a proposal page, where
+state is handed across routes in memory and a forced reload would lose
+work. Off on the dev server, which serves `/src/main.ts` rather than a
+hashed entry.
+
 ---
 
 ## Project Structure
@@ -91,6 +118,9 @@ frontend/
     │   ├── feedbackApi.ts      # Thin client for POST /api/feedback
     │   ├── selectPillPt.ts     # Shared PrimeVue Select pass-through styling
     │   └── uiLanguages.ts      # Language bar: order + which locales are live
+    ├── composables/
+    │   ├── useProposalFamily.ts  # One family request per evaluation; member lookups after
+    │   └── useMediaQuery.ts      # A reactive media query; LG_MEDIA_QUERY = Tailwind's lg
     ├── utils/
     │   └── octilinear.ts    # Octilinear map-line layout helpers
     └── components/
@@ -206,7 +236,7 @@ column holds the headline and every way onward (the filled "suggest a route"
 call to action on its own line, the quieter "see other suggestions",
 "suggest a new composition" (the feedback form, opened on the catalogue's
 fields) and "About" beneath it); the right column holds the pitch as three
-paragraphs —
+paragraphs (below `lg` the two columns stack, statement and buttons first) —
 `gallery.welcome.pitch.network`, `.contribute` and `.study`. Only the last
 carries the `{source}` link to Back-on-Track's reports; adding a paragraph
 means a new key there and an entry in `PITCH_PARAGRAPHS`. The band's height is
@@ -242,6 +272,22 @@ represents the current base, and which scenario a _reader_ sees is the
 gallery's scenario panel, not the author's last click. The save is silent:
 no toast per step. A failed save is not — it raises a sticky error toast.
 
+## The builder on a phone
+
+The proposal page stacks below `lg` like the gallery does, and two things
+follow from the width. **Expert timetable is a two-column tool**: its stepper
+column widens the itinerary past a phone, the departure strip and the night
+picker need the map beside the table, and it is precision work for a
+pointer. Below `lg` the button is not offered (`expertAvailable`, from
+`useMediaQuery(LG_MEDIA_QUERY)`), and a session that was in expert mode when
+the window narrowed leaves it the way the button does — overrides dropped,
+not hidden, so no invisible override reaches the next calc. The itinerary
+tool row wraps instead of running past the edge. **Every label row that
+carries a sticker wraps** (the "2032 prices" badge on the KPI tiles, the
+finance and details headings, the compare title), so a chip drops to the
+next line rather than leaving its box; KPI units never break inside
+("km / year" wraps as one).
+
 ## Errors in the builder
 
 Every failure in the proposal builder — a calculation (including the
@@ -259,20 +305,38 @@ calc failure carries a _Try again_ action on its toast.
 `Gallery.vue` is one screen with three parts: the search bar, the result
 column and the map beside it.
 
-**One screenful.** The results row — card column AND map — is exactly the
-viewport minus the gallery's own chrome, measured at runtime (`measureRow`, the
-same technique `LandingIntro` uses for its band) because the heading wraps and
-the search pill changes height with the active mode. Two things follow, and both
-are the point: the search bar stays on screen beside the map at 100% zoom, so
-changing a filter and seeing the result costs no scrolling; and the two columns
-are the same height, so the card list ends at the map's bottom edge instead of
-running past its corner. The cards scroll inside their own column, not down the
-page, which is also why the infinite-scroll sentinel is observed against that
-box (`root: cardScroller`) rather than the viewport. Anything added above the
-results row comes straight off the row's height — that is why the result count
-and the ownership switch live in the result column. `ROW_MIN_HEIGHT_PX` is the
-floor for short windows: it keeps room for roughly three cards, and below it the
-page scrolls again.
+**One screenful (from `lg` up).** The results row — card column AND map — is
+exactly the viewport minus the gallery's own chrome, measured at runtime
+(`measureRow`, the same technique `LandingIntro` uses for its band) because the
+heading wraps and the search pill changes height with the active mode. Two
+things follow, and both are the point: the search bar stays on screen beside the
+map at 100% zoom, so changing a filter and seeing the result costs no scrolling;
+and the two columns are the same height, so the card list ends at the map's
+bottom edge instead of running past its corner. The cards scroll inside their
+own column, not down the page, which is also why the infinite-scroll sentinel is
+observed against that box (`root: cardScroller`) rather than the viewport.
+Anything added above the results row comes straight off the row's height — that
+is why the result count and the ownership switch live in the result column.
+`ROW_MIN_HEIGHT_PX` is the floor for short windows: it keeps room for roughly
+three cards, and below it the page scrolls again.
+
+**One column below `lg`.** On a phone or a portrait tablet there is no
+"beside": the map comes first at a fixed height (`h-64`, `sm:h-96`), then the
+source/sort controls and the ownership switch, then the cards running down the
+page. The measured row height rides a CSS custom property (`--row-height`) so
+only the `lg:` class applies it, and the sentinel is observed against the
+viewport instead — `useMediaQuery(LG_MEDIA_QUERY)` is the one place the script
+needs to know which layout it is in, and it is pinned to the same breakpoint as
+the template's `lg:` classes so the observer's root and the column's overflow
+never disagree. The observer is rebuilt when the viewport crosses the
+breakpoint and on every re-activation of the cached page. The mode tabs become
+a 2×2 grid without dividers below `sm` (labels never wrap), and the search pill
+stacks its fields full-width with a labelled, full-width Search button. The
+stop and country overlays (`StopSelect.vue`, `CountrySelect.vue`) share the
+`.search-popover` rules in `style.css`: a width inside the viewport — a
+popover sizes shrink-to-fit, which on a phone meant "as wide as the longest
+station name" and a page that scrolled sideways — rows that truncate, and a
+shorter list below `sm` so it stays above the on-screen keyboard.
 
 **Two grains on the map** (`GalleryMap.vue`, helpers in `lib/galleryMap.ts`).
 The overview is `map_lines`: one line per stop-pair corridor across the whole
@@ -284,6 +348,49 @@ ramp, never scaled to the current result set). Hovering a card swaps the
 corridors for that one row's route from `map_routes`, which follows the list's
 own pagination. A corridor or route the ONTD catalogue could not route is
 dashed, at either grain.
+
+**Three requests per query.** Every list page asks for `summaries` +
+`map_routes` only; the corridor overview is a separate `map_lines` request
+(`fetchMapCorridors`, `loadCorridors()`) and the distribution panel's
+histograms a third (`fetchDistributions`, `loadDistributions()`), both sent
+alongside the first page of each query. The corridors aggregate the whole
+filtered set, so their cost grows with the catalogue — riding along with
+the first page let the unfiltered gallery time out (15 s interactive
+budget) before any card showed. They run on the `heavy` budget instead (no
+deadline, cancellable), the cards render as soon as their page lands, and
+the map shows a "Loading map…" / retry chip until the corridors arrive. A
+sort change reloads the cards but keeps corridors and histograms (same
+result set). Leaving the gallery while a request is in flight cancels it
+and remembers it, so coming back resumes the load instead of showing an
+empty column.
+
+**The range filters panel** (`GalleryDistribution.vue`, pure logic in
+`lib/galleryRanges.ts`). A collapsible above the scenario panel, in the same
+idiom: one line until opened — the preset's name ("Typical night trains")
+or "Custom ranges", then the ranges in effect as chips — so the map keeps
+its height while nobody is editing. Open, it shows one histogram at a time
+— distance, duration, average speed or stops, picked from the dropdown —
+of the backend's `distributions` section, proposals in blue with existing trains
+stacked on top in orange, bars outside the range dimmed. The range is set
+three ways: dragging the two handles (snapping to bin edges; arrow keys
+work too), typing a bound (empty = none), or the "Typical night trains"
+pill, which is a **preset** of the four ranges — the position paper's
+yardstick, one way 500–2 000 km, 7–21 h, at least 50 km/h
+(`lib/typicalNightTrain.ts`, one place for the numbers; the ⓘ overlay text
+is rendered from them). The panel starts on it, a dragged handle or a typed
+bound leaves it, and the pill brings it back (or, when on, clears every
+range). All four ranges persist while the histogram switches and show as
+chips with an ×, so the reader always sees what is in effect. Each
+histogram is counted on the filter minus its own range, so a bar is what
+this one range keeps or drops of the set the other filters leave. Every
+range goes out with `scope: 'proposal'`: **existing trains always stay
+listed**, they are the comparison, whether or not they meet the envelope.
+A drag commits once, on release — one reload per gesture, not per pixel.
+The chart's viewBox is 1 400 units wide from `lg` up, 900 from `sm`, 460
+below: the same drawing, proportioned so it stays readable on a phone and
+does not tower over the map on a desktop. In the URL: nothing for the preset; otherwise each bounded measure as
+`km=500-2000`, `h=7-21`, `kmh=50-`, `stops=-8` (an empty side is open),
+and `typical=0` for no ranges at all (also read from older links).
 
 **The scenario the figures are read on.** Every suggestion is stored once per
 scenario variant on the backend (§5.4a), so `GalleryScenarioPanel.vue` — the

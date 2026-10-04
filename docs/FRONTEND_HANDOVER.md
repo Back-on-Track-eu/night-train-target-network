@@ -1204,6 +1204,53 @@ place in the list. A `"missing"` row keeps its base geometry in
 
 ---
 
+## 25. Gallery: cards first, corridor map on its own request (2026-10-03)
+
+`POST /api/proposals` is unchanged; the gallery just splits its first load.
+Every list page includes `summaries` + `map_routes`; the corridor overview
+is a separate `include: ["map_lines"]` request (`fetchMapCorridors` in
+`lib/proposalsApi.ts`, `heavy` budget, no deadline) per query. `GalleryMap`
+takes a `corridorsStatus` prop (`'idle' | 'loading' | 'failed'`) and emits
+`retry-corridors`. Geometry in both line sections now arrives at 5 decimals
+and, for `map_routes`, simplified at ≈200 m — nothing on the client depends
+on the old precision.
+
+## 26. Gallery: the distribution panel — `POST /api/proposals` gains `distributions` (backend 0.5.14, 2026-10-04)
+
+One new `include` section, `"distributions"`: for each of
+`total_distance_km`, `total_time_h`, `avg_speed_kmh`, `n_stops` an object
+`{origin, top, bin_width, bins: [{from, to, n_proposals, n_existing}],
+unknown: {n_proposals, n_existing}}`. The axis is fixed on the backend
+(0–4 000 km in 100 km bins, 0–48 h in 1 h, 0–160 km/h in 5 km/h, 2–26
+stops in ones), the last bin is open (`to: null`, values at or past the
+top), and `unknown` counts rows with no value (existing trains without
+figures). **Each measure is counted on the request's filter minus its own
+range** — the histogram under a pair of range handles shows what that one
+range keeps or drops. Request it on its own (`fetchDistributions`,
+interactive budget; four aggregates, no geometry, well under 100 ms).
+
+The gallery's four range filters (`lib/galleryRanges.ts`) replace the
+`typicalOnly` toggle: the "typical night trains" preset is one value of
+the ranges, `n_stops` joins the three `ProposalsFilter` range keys, and
+every range carries `scope: 'proposal'`. URL keys `km`, `h`, `kmh`,
+`stops` (`min-max`, empty side open) replace `typical=0`, which is still
+read. `GalleryDistribution.vue` is the panel — a collapsible above the
+scenario panel, one summary line until opened (`v-model:ranges`,
+`distributions`, `status`, emits `retry`); `GalleryMap.vue` and the map
+column are unchanged.
+
+## 27. Open tabs follow a deploy — `useFreshBuild` (2026-10-04)
+
+No API change. `main.ts` starts `startFreshBuildWatch(router)` after
+mount: the app fetches `/index.html` (`cache: 'no-store'`) after boot, on
+tab focus and every ten minutes, and compares the entry bundle it names
+with the running one. Different → the gallery reloads at once (or right
+after the next navigation to it when the reader is elsewhere); the builder
+and proposal pages are never reloaded under the user. Backend-side nothing
+is needed; it relies on `index.html` naming a content-hashed entry, which
+every Vite build does. Expect one extra `GET /index.html` per tab per
+check in the edge logs.
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says

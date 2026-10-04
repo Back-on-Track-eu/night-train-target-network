@@ -1096,7 +1096,40 @@
       "label": "Wessen Strecken",
       "all": "Alle",
       "mine": "Meine",
-      "disabledHint": "Bestehende Verbindungen haben keinen Urheber — auf Vorschläge wechseln, um deine zu sehen."
+      "disabledHint": "Bestehende Verbindungen haben keinen Urheber — auf Vorschläge wechseln, um deine zu sehen.",
+      "typical": "Typische Nachtzüge",
+      "typicalHint": "Vorschläge mit {minKm}–{maxKm} km einfacher Fahrt, {minH}–{maxH} h und im Schnitt mindestens {minKmh} km/h – der Rahmen unseres Positionspapiers. Bestehende Züge werden immer gezeigt. Ausschalten zeigt alle Vorschläge."
+    },
+    "distribution": {
+      "title": "Bereichsfilter",
+      "measure": {
+        "total_distance_km": "Distanz (einfache Fahrt)",
+        "total_time_h": "Fahrzeit (einfache Fahrt)",
+        "avg_speed_kmh": "Durchschnittsgeschwindigkeit",
+        "n_stops": "Halte"
+      },
+      "unit": {
+        "total_distance_km": "km",
+        "total_time_h": "h",
+        "avg_speed_kmh": "km/h",
+        "n_stops": "Halte"
+      },
+      "min": "Minimum",
+      "max": "Maximum",
+      "any": "beliebig",
+      "lowerHandle": "Untere Grenze",
+      "upperHandle": "Obere Grenze",
+      "inEffect": "Aktive Bereiche:",
+      "none": "keine – alle Vorschläge",
+      "clear": "Diesen Bereich löschen",
+      "bin": "{from}–{to} {unit}",
+      "binOpen": "ab {from} {unit}",
+      "binCounts": "{proposals} Vorschläge · {existing} bestehend",
+      "existingAlways": "Bestehend (immer gezeigt)",
+      "unknownExisting": "{count} bestehender Zug ohne Kennzahlen | {count} bestehende Züge ohne Kennzahlen",
+      "loading": "Verteilung wird geladen …",
+      "failed": "Die Verteilung konnte nicht geladen werden.",
+      "custom": "Eigene Bereiche"
     },
     "scenario": {
       "label": "Szenario",
@@ -1123,7 +1156,9 @@
       "legend": {
         "proposed": "Vorschläge",
         "existing": "Bestehend"
-      }
+      },
+      "loading": "Karte wird geladen…",
+      "failed": "Die Karte konnte nicht geladen werden."
     },
     "card": {
       "distance": "Entfernung",

@@ -62,6 +62,24 @@ html {
   display: none;
 }
 
+/* The search overlays of StopSelect.vue and CountrySelect.vue. A popover is
+   sized shrink-to-fit, which here means "as wide as the longest name in the
+   list" — on a phone that ran off the right edge of the screen and scrolled
+   the whole page sideways. A width inside the viewport instead, and the
+   rows truncate. The list is shorter on a phone, where the on-screen
+   keyboard takes the lower third of the screen while the reader types. */
+.search-popover {
+  width: min(28rem, calc(100vw - 1rem));
+}
+.search-popover-list {
+  max-height: 20rem;
+}
+@media (max-width: 39.99rem) {
+  .search-popover-list {
+    max-height: 13rem;
+  }
+}
+
 @font-face {
   font-family: 'Mark Pro';
   src: url('@/assets/fonts/Mark Pro.ttf') format('truetype');

@@ -595,11 +595,27 @@ curl -L -o data-infra-2026\europe-latest.osm.pbf `
 
 The Docker setup uses a **two-stage build**:
 
-1. **Builder stage** — Maven + Java 21, clones and compiles OpenRailRouting
+1. **Builder stage** — Maven + Java 21, clones and compiles OpenRailRouting at
+   a pinned upstream commit (`ARG OPENRAILROUTING_COMMIT`: `ad27c18`, the
+   last one on GraphHopper 11.0)
 2. **Runtime stage** — JRE only, copies the JAR — keeps the image lean (~300 MB vs ~1.5 GB)
 
 The OSM data (`data-<key>/`) and routing graph (`graph-cache-<key>/`) are mounted as volumes
 outside the container so they survive image rebuilds.
+
+### Upgrading OpenRailRouting
+
+The upstream clone is pinned to a commit (`OPENRAILROUTING_COMMIT` in
+`docker/Dockerfile`, currently `ad27c18` — jar 1.1, GraphHopper 11.0).
+Unpinned, every image build silently picked up upstream master, which broke
+all builds on 2026-09-30 when v1.2 (GraphHopper 11.0 → 11.1) renamed the jar.
+The `v1.1` tag itself is not usable here: it still builds the old web
+frontend with an `npm install` Maven step, and the builder image has no npm;
+upstream dropped that step two commits later (`4cbdb7a`).
+
+To upgrade: set the new full commit SHA, rebuild, re-import every graph
+(`graph-cache-<key>/`) and upload the new caches to Drive. A GraphHopper
+version change is a graph-format question first and a code question second.
 
 The `config.yml` and `custom_models/` are baked into the image. Changes to these
 files require `docker compose build` followed by a re-import.
