@@ -1101,7 +1101,7 @@
       "typicalHint": "Vorschläge mit {minKm}–{maxKm} km einfacher Fahrt, {minH}–{maxH} h und im Schnitt mindestens {minKmh} km/h – der Rahmen unseres Positionspapiers. Bestehende Züge werden immer gezeigt. Ausschalten zeigt alle Vorschläge."
     },
     "distribution": {
-      "title": "Verteilung",
+      "title": "Bereichsfilter",
       "measure": {
         "total_distance_km": "Distanz (einfache Fahrt)",
         "total_time_h": "Fahrzeit (einfache Fahrt)",
@@ -1128,7 +1128,8 @@
       "existingAlways": "Bestehend (immer gezeigt)",
       "unknownExisting": "{count} bestehender Zug ohne Kennzahlen | {count} bestehende Züge ohne Kennzahlen",
       "loading": "Verteilung wird geladen …",
-      "failed": "Die Verteilung konnte nicht geladen werden."
+      "failed": "Die Verteilung konnte nicht geladen werden.",
+      "custom": "Eigene Bereiche"
     },
     "scenario": {
       "label": "Szenario",

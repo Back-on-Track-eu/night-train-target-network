@@ -2,12 +2,12 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from 'primevue/select'
-import { mdiClose, mdiWeatherNight } from '@mdi/js'
+import { mdiChevronDown, mdiClose, mdiWeatherNight } from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
 import InfoHint from '@/components/InfoHint.vue'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
-import { SM_MEDIA_QUERY, useMediaQuery } from '@/composables/useMediaQuery'
+import { LG_MEDIA_QUERY, SM_MEDIA_QUERY, useMediaQuery } from '@/composables/useMediaQuery'
 import { CORRIDOR_COLORS } from '@/lib/galleryMap'
 import {
   GALLERY_MEASURES,
@@ -23,12 +23,14 @@ import { selectPillPt } from '@/lib/selectPillPt'
 import { TYPICAL_NIGHT_TRAIN } from '@/lib/typicalNightTrain'
 import type { DistributionBin, DistributionsSection } from '@/types/api'
 
-// The gallery's range filters as one panel above the map: one histogram at
-// a time (the dropdown picks the measure), the range set by dragging the
-// two handles, by typing a bound, or by the "typical night trains" preset.
-// The ranges of all four measures persist while the histogram switches and
-// show as chips, so the reader always sees what is in effect, not only the
-// measure on screen.
+// The gallery's range filters as one collapsible panel above the scenario
+// panel, in the same idiom: one line until opened, naming the preset or the
+// ranges in effect — the map keeps its height while nobody is editing. Open,
+// it shows one histogram at a time (the dropdown picks the measure), the
+// range set by dragging the two handles, by typing a bound, or by the
+// "typical night trains" preset. The ranges of all four measures persist
+// while the histogram switches and show as chips, so the reader always sees
+// what is in effect, not only the measure on screen.
 //
 // The histogram is the backend's `distributions` section, counted on the
 // filter MINUS the measure's own range: a bar is what this one range keeps
@@ -52,6 +54,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const { formatInt } = useLocaleFormat()
 
+const open = ref(false)
 const measure = ref<GalleryMeasure>('total_distance_km')
 const measureOptions = computed(() =>
   GALLERY_MEASURES.map((key) => ({ value: key, label: t(`gallery.distribution.measure.${key}`) })),
@@ -135,11 +138,13 @@ const chips = computed(() =>
 
 // --- the chart -----------------------------------------------------------------
 // A viewBox scaled to the panel's width; the geometry below is in viewBox
-// units, so a narrower viewBox on a phone draws the same chart larger —
-// readable ticks, handles a thumb can take — at the cost of fewer pixels
-// per bin. Room above the plot for the handle grips and their labels.
-const wide = useMediaQuery(SM_MEDIA_QUERY)
-const W = computed(() => (wide.value ? 900 : 460))
+// units, so the viewBox width sets the chart's proportions: narrower on a
+// phone draws the same chart larger — readable ticks, handles a thumb can
+// take — and wider on a desktop keeps a full-width panel from towering
+// over the map it pushes down. Room above the plot for the grips and labels.
+const sm = useMediaQuery(SM_MEDIA_QUERY)
+const lg = useMediaQuery(LG_MEDIA_QUERY)
+const W = computed(() => (lg.value ? 1400 : sm.value ? 900 : 460))
 const H = 200
 const PAD = { left: 34, right: 14, top: 30, bottom: 24 }
 const plotW = computed(() => W.value - PAD.left - PAD.right)
@@ -276,290 +281,326 @@ function binLabel(b: DistributionBin): string {
 
 <template>
   <section
-    class="rounded-xl border border-primary-50/10 bg-sapphire-100 px-3 pt-3 pb-2"
+    class="w-full rounded-xl border border-primary-50/10 bg-primary-50/[0.03]"
     :aria-label="t('gallery.distribution.title')"
   >
-    <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <Select
-        v-model="measure"
-        :options="measureOptions"
-        option-value="value"
-        option-label="label"
-        :unstyled="true"
-        :pt="selectPillPt"
-        :aria-label="t('gallery.distribution.title')"
-      />
-      <!-- Typed bounds. Empty means no bound on that side. -->
-      <div class="flex items-center gap-1.5 text-sm text-primary-50/60">
-        <input
-          id="gallery-range-min"
-          type="number"
-          inputmode="decimal"
-          class="w-20 rounded-lg border border-primary-50/20 bg-sapphire px-2 py-1 text-right text-sm text-primary-50 tabular-nums placeholder:text-primary-50/30"
-          :value="bounds.min ?? ''"
-          :placeholder="axis ? formatInt(axis.origin) : ''"
-          :aria-label="t('gallery.distribution.min')"
-          @change="onInput('min', $event)"
-        />
-        <span aria-hidden="true">–</span>
-        <input
-          id="gallery-range-max"
-          type="number"
-          inputmode="decimal"
-          class="w-20 rounded-lg border border-primary-50/20 bg-sapphire px-2 py-1 text-right text-sm text-primary-50 tabular-nums placeholder:text-primary-50/30"
-          :value="bounds.max ?? ''"
-          :placeholder="t('gallery.distribution.any')"
-          :aria-label="t('gallery.distribution.max')"
-          @change="onInput('max', $event)"
-        />
-        <span class="min-w-8">{{ unit }}</span>
-      </div>
-      <!-- The preset, in the ownership pill's idiom; the bounds and what it
-           leaves alone behind the app's ⓘ overlay. -->
-      <span class="ml-auto flex items-center gap-1">
-        <button
-          type="button"
-          class="flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1 text-sm transition"
-          :class="
-            presetOn
-              ? 'bg-primary-50/15 font-semibold text-primary-50'
-              : 'text-primary-50/60 hover:text-primary-50'
-          "
-          :aria-pressed="presetOn"
-          @click="togglePreset"
-        >
-          <AppIcon :path="mdiWeatherNight" :size="16" />
-          {{ t('gallery.filter.typical') }}
-        </button>
-        <InfoHint :text="presetHint" />
+    <!-- One line: the preset's name or "custom", then the ranges in effect.
+         flex-wrap, so on a phone the chips run onto further lines and the
+         chevron keeps the right edge of whichever line it lands on. -->
+    <button
+      type="button"
+      class="flex w-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-left text-sm text-primary-50/70 transition hover:text-primary-50"
+      :aria-expanded="open"
+      @click="open = !open"
+    >
+      <AppIcon :path="mdiWeatherNight" :size="16" class="shrink-0 text-primary-50/40" />
+      <span class="text-primary-50/50">{{ t('gallery.distribution.title') }}</span>
+      <span class="font-semibold text-primary-50">
+        {{ presetOn ? t('gallery.filter.typical') : t('gallery.distribution.custom') }}
       </span>
-    </div>
+      <template v-if="!open">
+        <span
+          v-for="chip in chips"
+          :key="chip.key"
+          class="rounded-full bg-primary-50/10 px-2 py-0.5 text-xs whitespace-nowrap text-primary-50/80 tabular-nums"
+        >
+          {{ chip.text }}
+        </span>
+        <span v-if="!chips.length" class="text-xs text-primary-50/50">
+          {{ t('gallery.distribution.none') }}
+        </span>
+      </template>
+      <AppIcon
+        :path="mdiChevronDown"
+        :size="18"
+        class="ml-auto shrink-0 text-primary-50/40 transition-transform"
+        :class="open ? 'rotate-180' : ''"
+      />
+    </button>
 
-    <div class="relative mt-2">
-      <svg
-        ref="svg"
-        :viewBox="`0 0 ${W} ${H}`"
-        class="block h-auto w-full select-none"
-        role="img"
-        :aria-label="t('gallery.distribution.measure.' + measure)"
-      >
-        <template v-if="axis">
-          <!-- Two faint count lines and the baseline; the axis is recessive. -->
-          <g class="text-primary-50/60" fill="currentColor" font-size="11">
-            <template v-for="line in gridLines" :key="line.text">
+    <div v-if="open" class="border-t border-primary-50/10 px-3 pt-3 pb-2">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Select
+          v-model="measure"
+          :options="measureOptions"
+          option-value="value"
+          option-label="label"
+          :unstyled="true"
+          :pt="selectPillPt"
+          :aria-label="t('gallery.distribution.title')"
+        />
+        <!-- Typed bounds. Empty means no bound on that side. -->
+        <div class="flex items-center gap-1.5 text-sm text-primary-50/60">
+          <input
+            id="gallery-range-min"
+            type="number"
+            inputmode="decimal"
+            class="w-20 rounded-lg border border-primary-50/20 bg-sapphire px-2 py-1 text-right text-sm text-primary-50 tabular-nums placeholder:text-primary-50/30"
+            :value="bounds.min ?? ''"
+            :placeholder="axis ? formatInt(axis.origin) : ''"
+            :aria-label="t('gallery.distribution.min')"
+            @change="onInput('min', $event)"
+          />
+          <span aria-hidden="true">–</span>
+          <input
+            id="gallery-range-max"
+            type="number"
+            inputmode="decimal"
+            class="w-20 rounded-lg border border-primary-50/20 bg-sapphire px-2 py-1 text-right text-sm text-primary-50 tabular-nums placeholder:text-primary-50/30"
+            :value="bounds.max ?? ''"
+            :placeholder="t('gallery.distribution.any')"
+            :aria-label="t('gallery.distribution.max')"
+            @change="onInput('max', $event)"
+          />
+          <span class="min-w-8">{{ unit }}</span>
+        </div>
+        <!-- The preset, in the ownership pill's idiom; the bounds and what it
+           leaves alone behind the app's ⓘ overlay. -->
+        <span class="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            class="flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1 text-sm transition"
+            :class="
+              presetOn
+                ? 'bg-primary-50/15 font-semibold text-primary-50'
+                : 'text-primary-50/60 hover:text-primary-50'
+            "
+            :aria-pressed="presetOn"
+            @click="togglePreset"
+          >
+            <AppIcon :path="mdiWeatherNight" :size="16" />
+            {{ t('gallery.filter.typical') }}
+          </button>
+          <InfoHint :text="presetHint" />
+        </span>
+      </div>
+
+      <div class="relative mt-2">
+        <svg
+          ref="svg"
+          :viewBox="`0 0 ${W} ${H}`"
+          class="block h-auto w-full select-none"
+          role="img"
+          :aria-label="t('gallery.distribution.measure.' + measure)"
+        >
+          <template v-if="axis">
+            <!-- Two faint count lines and the baseline; the axis is recessive. -->
+            <g class="text-primary-50/60" fill="currentColor" font-size="11">
+              <template v-for="line in gridLines" :key="line.text">
+                <line
+                  :x1="PAD.left"
+                  :x2="W - PAD.right"
+                  :y1="line.y"
+                  :y2="line.y"
+                  stroke="currentColor"
+                  stroke-opacity="0.25"
+                  stroke-dasharray="2 4"
+                />
+                <text :x="PAD.left - 6" :y="line.y + 4" text-anchor="end">{{ line.text }}</text>
+              </template>
               <line
                 :x1="PAD.left"
                 :x2="W - PAD.right"
-                :y1="line.y"
-                :y2="line.y"
-                stroke="currentColor"
-                stroke-opacity="0.25"
-                stroke-dasharray="2 4"
-              />
-              <text :x="PAD.left - 6" :y="line.y + 4" text-anchor="end">{{ line.text }}</text>
-            </template>
-            <line
-              :x1="PAD.left"
-              :x2="W - PAD.right"
-              :y1="PAD.top + plotH"
-              :y2="PAD.top + plotH"
-              stroke="currentColor"
-              stroke-opacity="0.35"
-            />
-            <text
-              v-for="tick in ticks"
-              :key="tick.text"
-              :x="tick.x"
-              :y="H - 8"
-              :text-anchor="tick.anchor"
-            >
-              {{ tick.text }}
-            </text>
-          </g>
-
-          <!-- Bars: proposals, existing stacked on top, dimmed outside the range. -->
-          <g
-            v-for="bar in bars"
-            :key="bar.bin.from"
-            class="transition-opacity motion-reduce:transition-none"
-            :opacity="bar.inside ? 1 : 0.28"
-          >
-            <rect
-              v-if="bar.bin.n_proposals"
-              :x="bar.x"
-              :width="bar.w"
-              :y="bar.proposal.y"
-              :height="bar.proposal.h"
-              :fill="CORRIDOR_COLORS.proposed"
-              rx="1.5"
-            />
-            <rect
-              v-if="bar.bin.n_existing"
-              :x="bar.x"
-              :width="bar.w"
-              :y="bar.existing.y"
-              :height="bar.existing.h"
-              :fill="CORRIDOR_COLORS.existing"
-              rx="1.5"
-            />
-            <rect
-              :x="bar.hitX"
-              :width="bar.hitW"
-              :y="PAD.top"
-              :height="plotH"
-              fill="transparent"
-              @pointerenter="
-                hovered = { bin: bar.bin, x: bar.hitX + bar.hitW / 2, y: bar.existing.y }
-              "
-              @pointerleave="hovered = null"
-            />
-          </g>
-
-          <!-- The range: a bar across the top between the handles, a grip and
-               a guide line per handle, the bound's value above the grip. -->
-          <g class="text-primary-300">
-            <rect
-              :x="rangeBar.x"
-              :width="rangeBar.w"
-              :y="PAD.top - 8"
-              height="3"
-              fill="currentColor"
-              rx="1.5"
-            />
-            <g
-              v-for="h in handles"
-              :key="h.side"
-              class="cursor-ew-resize focus:outline-none"
-              :opacity="h.open ? 0.5 : 1"
-              tabindex="0"
-              role="slider"
-              :aria-label="
-                t(
-                  h.side === 'min'
-                    ? 'gallery.distribution.lowerHandle'
-                    : 'gallery.distribution.upperHandle',
-                )
-              "
-              :aria-valuenow="h.side === 'min' ? lo : hi"
-              :aria-valuemin="axis.origin"
-              :aria-valuemax="axis.top"
-              @pointerdown="startDrag($event, h.side)"
-              @keydown.left.prevent="nudge(h.side, -1)"
-              @keydown.right.prevent="nudge(h.side, 1)"
-            >
-              <line
-                :x1="h.x"
-                :x2="h.x"
-                :y1="PAD.top - 8"
+                :y1="PAD.top + plotH"
                 :y2="PAD.top + plotH"
                 stroke="currentColor"
-                stroke-width="1.5"
-              />
-              <rect
-                :x="h.x - 6"
-                :y="PAD.top - 12"
-                width="12"
-                height="12"
-                rx="3"
-                class="fill-primary-50"
+                stroke-opacity="0.35"
               />
               <text
-                v-if="h.label"
-                :x="h.x + (h.side === 'min' ? -9 : 9)"
-                :y="PAD.top - 14"
-                :text-anchor="h.side === 'min' ? 'end' : 'start'"
-                class="fill-primary-50"
-                font-size="11"
-                font-weight="600"
+                v-for="tick in ticks"
+                :key="tick.text"
+                :x="tick.x"
+                :y="H - 8"
+                :text-anchor="tick.anchor"
               >
-                {{ h.label }}
+                {{ tick.text }}
               </text>
             </g>
-          </g>
-        </template>
-      </svg>
 
-      <!-- Hover: the bin and its two counts. -->
-      <div
-        v-if="hovered"
-        class="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-lg border border-primary-50/20 bg-sapphire px-2 py-1 text-xs whitespace-nowrap text-primary-50 tabular-nums shadow-md"
-        :style="{
-          left: `${(hovered.x / W) * 100}%`,
-          top: `${(Math.max(hovered.y - 4, PAD.top + 34) / H) * 100}%`,
-        }"
-      >
-        <b class="font-semibold">{{ binLabel(hovered.bin) }}</b
-        ><br />
-        {{
-          t('gallery.distribution.binCounts', {
-            proposals: formatInt(hovered.bin.n_proposals),
-            existing: formatInt(hovered.bin.n_existing),
-          })
-        }}
-      </div>
-
-      <!-- No data yet, or none at all: say so in the chart's own space. -->
-      <div
-        v-if="!axis || status !== 'idle'"
-        class="absolute inset-x-0 top-0 flex justify-center pt-2"
-        role="status"
-      >
-        <span
-          class="flex items-center gap-2 rounded-lg bg-sapphire/80 px-3 py-1 text-xs text-primary-50/70"
-        >
-          <template v-if="status === 'failed'">
-            {{ t('gallery.distribution.failed') }}
-            <button
-              type="button"
-              class="cursor-pointer font-semibold text-primary-50 underline underline-offset-2"
-              @click="emit('retry')"
+            <!-- Bars: proposals, existing stacked on top, dimmed outside the range. -->
+            <g
+              v-for="bar in bars"
+              :key="bar.bin.from"
+              class="transition-opacity motion-reduce:transition-none"
+              :opacity="bar.inside ? 1 : 0.28"
             >
-              {{ t('errors.retry') }}
-            </button>
+              <rect
+                v-if="bar.bin.n_proposals"
+                :x="bar.x"
+                :width="bar.w"
+                :y="bar.proposal.y"
+                :height="bar.proposal.h"
+                :fill="CORRIDOR_COLORS.proposed"
+                rx="1.5"
+              />
+              <rect
+                v-if="bar.bin.n_existing"
+                :x="bar.x"
+                :width="bar.w"
+                :y="bar.existing.y"
+                :height="bar.existing.h"
+                :fill="CORRIDOR_COLORS.existing"
+                rx="1.5"
+              />
+              <rect
+                :x="bar.hitX"
+                :width="bar.hitW"
+                :y="PAD.top"
+                :height="plotH"
+                fill="transparent"
+                @pointerenter="
+                  hovered = { bin: bar.bin, x: bar.hitX + bar.hitW / 2, y: bar.existing.y }
+                "
+                @pointerleave="hovered = null"
+              />
+            </g>
+
+            <!-- The range: a bar across the top between the handles, a grip and
+               a guide line per handle, the bound's value above the grip. -->
+            <g class="text-primary-300">
+              <rect
+                :x="rangeBar.x"
+                :width="rangeBar.w"
+                :y="PAD.top - 8"
+                height="3"
+                fill="currentColor"
+                rx="1.5"
+              />
+              <g
+                v-for="h in handles"
+                :key="h.side"
+                class="cursor-ew-resize focus:outline-none"
+                :opacity="h.open ? 0.5 : 1"
+                tabindex="0"
+                role="slider"
+                :aria-label="
+                  t(
+                    h.side === 'min'
+                      ? 'gallery.distribution.lowerHandle'
+                      : 'gallery.distribution.upperHandle',
+                  )
+                "
+                :aria-valuenow="h.side === 'min' ? lo : hi"
+                :aria-valuemin="axis.origin"
+                :aria-valuemax="axis.top"
+                @pointerdown="startDrag($event, h.side)"
+                @keydown.left.prevent="nudge(h.side, -1)"
+                @keydown.right.prevent="nudge(h.side, 1)"
+              >
+                <line
+                  :x1="h.x"
+                  :x2="h.x"
+                  :y1="PAD.top - 8"
+                  :y2="PAD.top + plotH"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                />
+                <rect
+                  :x="h.x - 6"
+                  :y="PAD.top - 12"
+                  width="12"
+                  height="12"
+                  rx="3"
+                  class="fill-primary-50"
+                />
+                <text
+                  v-if="h.label"
+                  :x="h.x + (h.side === 'min' ? -9 : 9)"
+                  :y="PAD.top - 14"
+                  :text-anchor="h.side === 'min' ? 'end' : 'start'"
+                  class="fill-primary-50"
+                  font-size="11"
+                  font-weight="600"
+                >
+                  {{ h.label }}
+                </text>
+              </g>
+            </g>
           </template>
-          <template v-else-if="!axis || status === 'loading'">
-            <AppSpinner :size="12" />
-            {{ t('gallery.distribution.loading') }}
-          </template>
+        </svg>
+
+        <!-- Hover: the bin and its two counts. -->
+        <div
+          v-if="hovered"
+          class="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-lg border border-primary-50/20 bg-sapphire px-2 py-1 text-xs whitespace-nowrap text-primary-50 tabular-nums shadow-md"
+          :style="{
+            left: `${(hovered.x / W) * 100}%`,
+            top: `${(Math.max(hovered.y - 4, PAD.top + 34) / H) * 100}%`,
+          }"
+        >
+          <b class="font-semibold">{{ binLabel(hovered.bin) }}</b
+          ><br />
+          {{
+            t('gallery.distribution.binCounts', {
+              proposals: formatInt(hovered.bin.n_proposals),
+              existing: formatInt(hovered.bin.n_existing),
+            })
+          }}
+        </div>
+
+        <!-- No data yet, or none at all: say so in the chart's own space. -->
+        <div
+          v-if="!axis || status !== 'idle'"
+          class="absolute inset-x-0 top-0 flex justify-center pt-2"
+          role="status"
+        >
+          <span
+            class="flex items-center gap-2 rounded-lg bg-sapphire/80 px-3 py-1 text-xs text-primary-50/70"
+          >
+            <template v-if="status === 'failed'">
+              {{ t('gallery.distribution.failed') }}
+              <button
+                type="button"
+                class="cursor-pointer font-semibold text-primary-50 underline underline-offset-2"
+                @click="emit('retry')"
+              >
+                {{ t('errors.retry') }}
+              </button>
+            </template>
+            <template v-else-if="!axis || status === 'loading'">
+              <AppSpinner :size="12" />
+              {{ t('gallery.distribution.loading') }}
+            </template>
+          </span>
+        </div>
+      </div>
+
+      <!-- Every range in effect, whichever histogram is up. -->
+      <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-primary-50/60">
+        <span>{{ t('gallery.distribution.inEffect') }}</span>
+        <span v-if="!chips.length">{{ t('gallery.distribution.none') }}</span>
+        <button
+          v-for="chip in chips"
+          :key="chip.key"
+          type="button"
+          class="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-0.5 text-xs text-primary-50 tabular-nums transition hover:bg-primary-50/20"
+          :class="presetOn ? 'bg-primary-50/15' : 'bg-sapphire-200'"
+          :title="t('gallery.distribution.clear')"
+          @click="clearMeasure(chip.key)"
+        >
+          {{ chip.text }}
+          <AppIcon :path="mdiClose" :size="12" class="text-primary-50/60" />
+        </button>
+        <span class="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span class="flex items-center gap-1.5 whitespace-nowrap">
+            <i
+              class="inline-block h-2.5 w-2.5 rounded-sm"
+              :style="{ backgroundColor: CORRIDOR_COLORS.proposed }"
+            />
+            {{ t('gallery.map.legend.proposed') }}
+          </span>
+          <span class="flex items-center gap-1.5 whitespace-nowrap">
+            <i
+              class="inline-block h-2.5 w-2.5 rounded-sm"
+              :style="{ backgroundColor: CORRIDOR_COLORS.existing }"
+            />
+            {{ t('gallery.distribution.existingAlways') }}
+          </span>
+          <span v-if="data && data.unknown.n_existing" class="whitespace-nowrap">
+            {{ t('gallery.distribution.unknownExisting', data.unknown.n_existing) }}
+          </span>
         </span>
       </div>
-    </div>
-
-    <!-- Every range in effect, whichever histogram is up. -->
-    <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-primary-50/60">
-      <span>{{ t('gallery.distribution.inEffect') }}</span>
-      <span v-if="!chips.length">{{ t('gallery.distribution.none') }}</span>
-      <button
-        v-for="chip in chips"
-        :key="chip.key"
-        type="button"
-        class="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-0.5 text-xs text-primary-50 tabular-nums transition hover:bg-primary-50/20"
-        :class="presetOn ? 'bg-primary-50/15' : 'bg-sapphire-200'"
-        :title="t('gallery.distribution.clear')"
-        @click="clearMeasure(chip.key)"
-      >
-        {{ chip.text }}
-        <AppIcon :path="mdiClose" :size="12" class="text-primary-50/60" />
-      </button>
-      <span class="ml-auto flex items-center gap-3">
-        <span class="flex items-center gap-1.5 whitespace-nowrap">
-          <i
-            class="inline-block h-2.5 w-2.5 rounded-sm"
-            :style="{ backgroundColor: CORRIDOR_COLORS.proposed }"
-          />
-          {{ t('gallery.map.legend.proposed') }}
-        </span>
-        <span class="flex items-center gap-1.5 whitespace-nowrap">
-          <i
-            class="inline-block h-2.5 w-2.5 rounded-sm"
-            :style="{ backgroundColor: CORRIDOR_COLORS.existing }"
-          />
-          {{ t('gallery.distribution.existingAlways') }}
-        </span>
-        <span v-if="data && data.unknown.n_existing">
-          {{ t('gallery.distribution.unknownExisting', data.unknown.n_existing) }}
-        </span>
-      </span>
     </div>
   </section>
 </template>

@@ -1101,7 +1101,7 @@
       "typicalHint": "Proposals of one way {minKm}–{maxKm} km, {minH}–{maxH} h and at least {minKmh} km/h on average — the range of our position paper. Existing trains are always shown. Switch off to see every proposal."
     },
     "distribution": {
-      "title": "Distribution",
+      "title": "Range filters",
       "measure": {
         "total_distance_km": "Distance (one way)",
         "total_time_h": "Duration (one way)",
@@ -1128,7 +1128,8 @@
       "existingAlways": "Existing (always shown)",
       "unknownExisting": "{count} existing train without figures | {count} existing trains without figures",
       "loading": "Loading distribution…",
-      "failed": "The distribution couldn't be loaded."
+      "failed": "The distribution couldn't be loaded.",
+      "custom": "Custom ranges"
     },
     "scenario": {
       "label": "Scenario",

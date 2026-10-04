@@ -1091,6 +1091,17 @@ onActivated(() => {
       </div>
     </div>
 
+    <!-- The range filters, collapsed to one line by default like the scenario
+         panel below it: the line names the preset or the ranges in effect,
+         and opening it costs the map its height (measureRow) only while the
+         reader is actually editing. -->
+    <GalleryDistribution
+      v-model:ranges="ranges"
+      :distributions="distributions"
+      :status="distributionsStatus"
+      @retry="loadDistributions"
+    />
+
     <!-- The scenario the figures are read on. Collapsed to one line by
          default — see the component: an open panel costs the map its height
          (measureRow), and the summary line already answers "which figures am
@@ -1297,29 +1308,18 @@ onActivated(() => {
         </div>
       </div>
 
-      <!-- The distribution panel above the map; the map takes whatever height
-           the row leaves. A fixed map height below lg: there the row has no
-           height of its own, so the box has to bring its own. -->
+      <!-- A fixed height below lg: the map fills the row's height from lg up,
+           and below it the row has none, so the box has to bring its own. -->
       <div
-        class="order-first flex w-full flex-col gap-3 lg:order-none lg:h-full lg:min-w-0 lg:flex-1"
+        class="order-first h-64 w-full overflow-hidden rounded-xl border border-primary-50/10 sm:h-96 lg:order-none lg:h-full lg:w-auto lg:flex-1"
       >
-        <GalleryDistribution
-          v-model:ranges="ranges"
-          :distributions="distributions"
-          :status="distributionsStatus"
-          @retry="loadDistributions"
+        <GalleryMap
+          :corridors="corridors"
+          :corridors-status="corridorsStatus"
+          :routes="routeFeatures"
+          :highlighted-row="hoveredRow"
+          @retry-corridors="loadCorridors"
         />
-        <div
-          class="h-64 w-full overflow-hidden rounded-xl border border-primary-50/10 sm:h-96 lg:h-auto lg:min-h-0 lg:flex-1"
-        >
-          <GalleryMap
-            :corridors="corridors"
-            :corridors-status="corridorsStatus"
-            :routes="routeFeatures"
-            :highlighted-row="hoveredRow"
-            @retry-corridors="loadCorridors"
-          />
-        </div>
       </div>
     </div>
   </div>
