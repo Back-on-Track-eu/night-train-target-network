@@ -63,6 +63,22 @@ rule a browser may reuse a heuristically "fresh" `index.html` after a
 deploy and keep running the previous bundle until the user forces a
 reload. A change to `nginx.conf` ships with the next frontend image build.
 
+**Staying on the current build** (`composables/useFreshBuild.ts`, helpers
+in `lib/freshBuild.ts`). The headers above decide what a browser does on
+its next page load; a tab that stays open across a deploy never makes one.
+So the app checks for itself: shortly after boot, whenever the tab becomes
+visible again and every ten minutes (at most once a minute) it fetches
+`/index.html` with `cache: 'no-store'` and compares the `index-*.js` it
+names with the one that booted the page. A different name means a deploy
+happened — or the browser served a stale `index.html` — and the tab is
+stale. On the gallery it reloads right away (everything it shows is in the
+URL; it waits only while the reader is typing in a field). Anywhere else it
+reloads right after the next navigation to the gallery, which lands on the
+new build at that URL — never inside the builder or a proposal page, where
+state is handed across routes in memory and a forced reload would lose
+work. Off on the dev server, which serves `/src/main.ts` rather than a
+hashed entry.
+
 ---
 
 ## Project Structure

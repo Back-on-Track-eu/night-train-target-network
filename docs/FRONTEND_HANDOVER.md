@@ -1239,6 +1239,18 @@ scenario panel, one summary line until opened (`v-model:ranges`,
 `distributions`, `status`, emits `retry`); `GalleryMap.vue` and the map
 column are unchanged.
 
+## 27. Open tabs follow a deploy — `useFreshBuild` (2026-10-04)
+
+No API change. `main.ts` starts `startFreshBuildWatch(router)` after
+mount: the app fetches `/index.html` (`cache: 'no-store'`) after boot, on
+tab focus and every ten minutes, and compares the entry bundle it names
+with the running one. Different → the gallery reloads at once (or right
+after the next navigation to it when the reader is elsewhere); the builder
+and proposal pages are never reloaded under the user. Backend-side nothing
+is needed; it relies on `index.html` naming a content-hashed entry, which
+every Vite build does. Expect one extra `GET /index.html` per tab per
+check in the edge logs.
+
 ## Maintaining this document
 
 One file, updated in the same PR as the backend change. Each entry says
