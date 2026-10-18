@@ -558,6 +558,15 @@ onMounted(() => {
     maxBounds: EUROPE_BOUNDS,
   })
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+  // On a narrow map MapLibre makes the credits compact but opens them, and
+  // only folds them back to their (i) on the first drag — until then the
+  // line wraps across the bottom of a phone-width map, over the legend.
+  // Folded once the map has settled; the (i) still opens them.
+  map.once('idle', () => {
+    mapContainer.value
+      ?.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact')
+      ?.classList.remove('maplibregl-compact-show')
+  })
   map.on('load', () => {
     mapLoaded = true
     // The first payload usually arrives before the style finishes loading, so

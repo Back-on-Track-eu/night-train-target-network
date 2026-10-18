@@ -109,7 +109,7 @@ const comingSoonChipClass =
             v-for="option in axes.networks"
             :key="option.network"
             type="button"
-            class="rounded-full px-3.5 py-1 text-sm transition"
+            class="rounded-full px-3.5 py-1 text-sm whitespace-nowrap transition"
             :class="[
               state.network === option.network
                 ? 'bg-amber-400 font-semibold text-sapphire'

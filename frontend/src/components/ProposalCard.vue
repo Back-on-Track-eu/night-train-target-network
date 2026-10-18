@@ -9,6 +9,7 @@ import { useStore } from '@/stores/store'
 import { useToastStore } from '@/stores/toastStore'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { formatEur } from '@/lib/money'
+import { endpointClocks } from '@/lib/cardClock'
 import { likeProposal, unlikeProposal } from '@/lib/proposalsApi'
 import { useApiFailure } from '@/composables/useApiFailure'
 import type { ProposalSummary } from '@/types/api'
@@ -39,17 +40,26 @@ const store = useStore()
 const { locale, formatInt, formatDate } = useLocaleFormat()
 const { report } = useApiFailure()
 
-// Summaries carry stop_ids only (in travel order); resolve display names from
-// the loaded stop list, falling back to the id (existing/ONTD rows may carry
-// stop ids outside the curated list).
-const nameById = computed(() => new Map(store.stops.map((s) => [s.stop_id, s.name])))
-const stopName = (id: string): string => nameById.value.get(id) ?? id
+// Summaries carry stop_ids only (in travel order); resolve display names and
+// countries from the loaded stop list, falling back to the id and no flag
+// (existing/ONTD rows may carry stop ids outside the curated list).
+const stopById = computed(() => new Map(store.stops.map((s) => [s.stop_id, s])))
+const stopName = (id: string): string => stopById.value.get(id)?.name ?? id
 
 const stopIds = computed(() => props.proposal.stop_ids)
 
+// --- The timetable ------------------------------------------------------
+// Departure beside the origin, arrival beside the destination, the way a rail
+// search lists a train — a pinned searched stop in between has no time of its
+// own in the summary. "+1" marks a next-day arrival. Rows without times
+// (null in the summary) keep the column as a plain timeline dot.
+const clocks = computed(() =>
+  endpointClocks(props.proposal.departure_time, props.proposal.arrival_time),
+)
+
 // Anchor indices into stop_ids: origin, destination, and any searched stops that
 // land strictly between them. Everything between two anchors is that segment's
-// collapsible "(N stops)" run.
+// "N stops" run.
 const anchorIndices = computed(() => {
   const ids = stopIds.value
   if (ids.length <= 1) return ids.length ? [0] : []
@@ -70,18 +80,37 @@ const itinerary = computed(() => {
   const anchors = idxs.map((idx, pos) => ({
     id: ids[idx],
     name: stopName(ids[idx]),
+    country: stopById.value.get(ids[idx])?.country_code ?? null,
+    clock:
+      pos === 0 ? clocks.value.departure : pos === idxs.length - 1 ? clocks.value.arrival : null,
     // Endpoints (origin/destination) are bold; a pinned searched stop is the
     // same colour but less bold.
     highlighted: pos !== 0 && pos !== idxs.length - 1,
   }))
-  const segments: { stop_id: string; stop_name: string }[][] = []
-  for (let k = 0; k < idxs.length - 1; k++) {
-    segments.push(
-      ids.slice(idxs[k] + 1, idxs[k + 1]).map((id) => ({ stop_id: id, stop_name: stopName(id) })),
+  const segments = idxs
+    .slice(1)
+    .map((idx, k) =>
+      ids.slice(idxs[k] + 1, idx).map((id) => ({ stop_id: id, stop_name: stopName(id) })),
     )
-  }
   return { anchors, segments }
 })
+
+// Total one-way travel time, on the first run of the timeline: "9h 29m".
+// Same words as the builder map's leg tooltip (MapView.vue's formatDuration).
+const duration = computed(() => {
+  const minutes = Math.round(props.proposal.total_time_h * 60)
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return t('proposal.map.durationM', { m })
+  if (m === 0) return t('proposal.map.durationH', { h })
+  return t('proposal.map.durationHm', { h, m })
+})
+function segmentLabel(k: number): string {
+  const stops = itinerary.value.segments[k].length
+  const parts = k === 0 ? [duration.value] : []
+  if (stops > 0) parts.push(t('gallery.card.stops', stops))
+  return parts.join(' · ')
+}
 
 // --- The figures --------------------------------------------------------
 // One two-column grid, filled in a fixed order — distance | speed,
@@ -90,7 +119,8 @@ const itinerary = computed(() => {
 // a column instead of re-parsed card by card: the route's physics on the
 // first row, what runs and who rides on the second, climate and its price on
 // the third. Every value is kept to ONE line: a figure that wraps breaks the
-// alignment the grid exists for.
+// alignment the grid exists for. Each carries a short label under it — the
+// longer explanation is a hover popover, which a phone never shows.
 //
 // Composition is proposals-only. An existing (ONTD) row carries whatever the
 // catalogue names, but nothing in the app can pick, change or show it — so the
@@ -137,14 +167,14 @@ const stats = computed(() => {
     list.push({
       key: 'demand',
       icon: mdiAccountGroupOutline,
-      value: t('gallery.card.demandPerYear', { value: formatInt(p.demand_trips_per_year) }),
+      value: formatInt(p.demand_trips_per_year),
     })
   }
   if (p.source === 'proposal' && p.co2_savings_t_per_year != null) {
     list.push({
       key: 'co2',
       icon: mdiLeaf,
-      value: t('gallery.card.co2PerYear', { value: formatInt(p.co2_savings_t_per_year) }),
+      value: t('gallery.card.tonnes', { value: formatInt(p.co2_savings_t_per_year) }),
     })
   }
   // Straight after the saving it prices — the two are one argument.
@@ -152,12 +182,10 @@ const stats = computed(() => {
     list.push({
       key: 'subsidyPerTCo2',
       icon: mdiCashMultiple,
-      value: t('gallery.card.subsidyPerTCo2', {
-        value: formatEur(p.subsidy_eur_per_t_co2, locale.value),
-      }),
+      value: formatEur(p.subsidy_eur_per_t_co2, locale.value),
     })
   }
-  return list
+  return list.map((stat) => ({ ...stat, label: t(`gallery.card.label.${stat.key}`) }))
 })
 
 // --- Authoring dates -------------------------------------------------------
@@ -308,12 +336,6 @@ async function onLikeClick() {
     likeBusy.value = false
   }
 }
-
-// Alphabetical, as the summary carries them. Itinerary order used to come from
-// the per-proposal route fetch the gallery no longer makes (the map now rides
-// the list request), and is not worth one request per card on its own. The
-// discs themselves are CountryFlags.vue, shared with the route stats panel.
-const flagCountries = computed(() => props.proposal.countries)
 </script>
 
 <template>
@@ -330,32 +352,67 @@ const flagCountries = computed(() => props.proposal.countries)
     @keydown.enter="onCardClick"
     @keydown.space.prevent="onCardClick"
   >
-    <!-- Itinerary. Between anchors we show "(N stops)" while idle; on hover it
-         fades out and the actual intermediate stops slide in from above. The
-         intermediate names are the quietest text on the card: they are context
-         for the route, not a second headline. -->
-    <div class="flex flex-col items-center px-1 text-center leading-tight">
-      <!-- The countries belong to the itinerary, not to the proposer: they say
-           what the route crosses, so they head the stop list rather than
-           sitting in the metadata foot. -->
-      <CountryFlags :countries="flagCountries" class="mb-1.5" />
+    <!-- Itinerary as a timetable, read top to bottom: departure time and
+         origin, the run between them (travel time, stops passed), arrival time
+         and destination — plus any searched stop pinned between, so the card
+         shows why it matched. Names are as prominent as the times: on a "via"
+         search the endpoints are the news. Each end carries its own country
+         flag; a stop outside the curated list has none. -->
+    <div
+      class="group/stops grid items-center gap-x-3"
+      :class="
+        clocks.departure || clocks.arrival
+          ? 'grid-cols-[3.75rem_minmax(0,1fr)_auto]'
+          : 'grid-cols-[0.75rem_minmax(0,1fr)_auto]'
+      "
+    >
       <template v-for="(anchor, i) in itinerary.anchors" :key="`a-${i}`">
+        <span class="text-lg leading-snug font-bold whitespace-nowrap text-primary-50 tabular-nums">
+          <template v-if="anchor.clock">
+            {{ anchor.clock.time
+            }}<sup
+              v-if="anchor.clock.dayOffset > 0"
+              class="ml-0.5 text-[0.65rem] font-medium text-primary-50/70"
+              >+{{ anchor.clock.dayOffset }}</sup
+            >
+          </template>
+          <span
+            v-else
+            class="mx-auto block h-1.5 w-1.5 rounded-full bg-primary-50/50"
+            aria-hidden="true"
+          />
+        </span>
         <span
-          class="text-base text-primary-50"
+          class="text-lg leading-snug text-primary-50"
           :class="anchor.highlighted ? 'font-medium' : 'font-bold'"
           >{{ anchor.name }}</span
         >
-        <template v-if="i < itinerary.segments.length && itinerary.segments[i].length">
-          <span
-            class="max-h-5 overflow-hidden py-0.5 text-xs font-normal text-primary-50/35 opacity-100 transition-all duration-300 group-hover:max-h-0 group-hover:py-0 group-hover:opacity-0"
-            >{{ t('gallery.card.stops', itinerary.segments[i].length) }}</span
-          >
-          <span
-            v-for="s in itinerary.segments[i]"
-            :key="s.stop_id"
-            class="max-h-0 -translate-y-2 overflow-hidden whitespace-nowrap py-0 text-xs font-normal text-primary-50/55 opacity-0 transition-all duration-300 group-hover:max-h-5 group-hover:translate-y-0 group-hover:py-0.5 group-hover:opacity-100"
-            >{{ s.stop_name }}</span
-          >
+        <CountryFlags v-if="anchor.country" :countries="[anchor.country]" size="1.25rem" />
+        <span v-else />
+        <template v-if="i < itinerary.segments.length">
+          <span class="mx-auto min-h-7 w-px self-stretch bg-primary-50/25" aria-hidden="true" />
+          <!-- On a desktop, hovering the stations (not the whole card) swaps a
+               run's "travel time · N stops" for the stops it passes — the
+               quietest text on the card, context for the route rather than a
+               second headline. A run without stops keeps its line. A phone
+               has no hover, so there the count is all. -->
+          <span class="col-span-2 flex flex-col py-1.5 text-xs leading-snug">
+            <span
+              class="max-h-5 overflow-hidden text-primary-50/60 tabular-nums transition-all duration-300"
+              :class="
+                itinerary.segments[i].length
+                  ? 'lg:group-hover/stops:max-h-0 lg:group-hover/stops:opacity-0'
+                  : ''
+              "
+              >{{ segmentLabel(i) }}</span
+            >
+            <span
+              v-for="stop in itinerary.segments[i]"
+              :key="stop.stop_id"
+              class="max-h-0 -translate-y-1 overflow-hidden whitespace-nowrap text-primary-50/55 opacity-0 transition-all duration-300 max-lg:hidden lg:group-hover/stops:max-h-5 lg:group-hover/stops:translate-y-0 lg:group-hover/stops:opacity-100"
+              >{{ stop.stop_name }}</span
+            >
+          </span>
         </template>
       </template>
     </div>
@@ -370,20 +427,23 @@ const flagCountries = computed(() => props.proposal.countries)
     >
       {{ t(`gallery.card.${noFiguresKey}`) }}
     </p>
-    <div v-else class="grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-primary-50/10 pt-2.5">
+    <div v-else class="grid grid-cols-2 gap-x-3 gap-y-2.5 border-t border-primary-50/10 pt-2.5">
       <!-- w-fit so the hover target is the stat itself, not the full grid cell
            — otherwise the popover opens from empty space beside it. -->
       <div
         v-for="stat in stats"
         :key="stat.key"
-        class="flex w-fit cursor-help items-center gap-2"
+        class="flex w-fit cursor-help items-start gap-2"
         @mouseenter="openStat(stat.key, $event)"
         @mouseleave="scheduleClose"
       >
-        <AppIcon :path="stat.icon" :size="16" class="shrink-0 text-primary-50/35" />
-        <span class="whitespace-nowrap text-sm tabular-nums text-primary-50/85">{{
-          stat.value
-        }}</span>
+        <AppIcon :path="stat.icon" :size="16" class="mt-0.5 shrink-0 text-primary-50/35" />
+        <span class="flex flex-col">
+          <span class="whitespace-nowrap text-sm tabular-nums text-primary-50/85">{{
+            stat.value
+          }}</span>
+          <span class="text-xs text-primary-50/55">{{ stat.label }}</span>
+        </span>
       </div>
     </div>
 
@@ -422,7 +482,7 @@ const flagCountries = computed(() => props.proposal.countries)
       <div v-if="proposal.source === 'proposal'" class="flex shrink-0 items-center gap-1">
         <button
           type="button"
-          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-2 text-primary-50/55 transition hover:bg-primary-50/10 hover:text-primary-50"
+          class="flex h-11 cursor-pointer items-center gap-1.5 rounded-full px-2 lg:h-8 text-primary-50/55 transition hover:bg-primary-50/10 hover:text-primary-50"
           :aria-label="t('gallery.card.comments')"
           @click.stop="onCommentsClick"
           @mouseenter="openStat('comments', $event)"
@@ -435,7 +495,7 @@ const flagCountries = computed(() => props.proposal.countries)
           type="button"
           :disabled="likeBusy"
           :aria-label="t('gallery.card.like')"
-          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-2 transition hover:bg-primary-50/10 disabled:cursor-not-allowed"
+          class="flex h-11 cursor-pointer items-center gap-1.5 rounded-full px-2 lg:h-8 transition hover:bg-primary-50/10 disabled:cursor-not-allowed"
           :class="likedByMe ? 'text-primary-50' : 'text-primary-50/55 hover:text-primary-50'"
           @click.stop="onLikeClick"
         >
