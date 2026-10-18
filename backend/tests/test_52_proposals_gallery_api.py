@@ -238,6 +238,31 @@ class TestFilterKinds:
         assert existing[_EXISTING_ROUTE_IDS[0]]["total_distance_km"] == 700.0
         assert existing[_EXISTING_ROUTE_IDS[0]]["total_time_h"] == 9.5
 
+    def test_gallery_rows_carry_endpoint_times(
+        self, api_base, computed, published, existing_routes
+    ):
+        """departure_time / arrival_time are the outbound run's first
+        departure and last arrival, "HH:MM" with hours past 24 kept. An
+        existing row whose ONTD trips are absent (the fixture writes no
+        ontd.trips) carries null rather than failing."""
+        stops = stop_times(computed["route"]["trip_pairs"][0]["outbound"])
+
+        def hhmm(minutes: int) -> str:
+            return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+        row = _summary_row(api_base, published)
+        assert row["departure_time"] == hhmm(stops[0]["departure_time_min"])
+        assert row["arrival_time"] == hhmm(stops[-1]["arrival_time_min"])
+
+        existing = {
+            r["route_id"]: r
+            for r in _gallery(api_base, filter={"sources": ["existing"]}, limit=500)[
+                "summaries"
+            ]["proposals"]
+        }
+        assert existing[_EXISTING_ROUTE_IDS[0]]["departure_time"] is None
+        assert existing[_EXISTING_ROUTE_IDS[0]]["arrival_time"] is None
+
     def test_list_filter_composition_ids(self, api_base, published):
         hit = _gallery(api_base, filter={"composition_ids": [_COMPOSITION]})
         assert published["proposal_id"] in _proposal_ids(hit)
@@ -473,6 +498,8 @@ class TestSourceUnion:
             "composition_id",
             "total_distance_km",
             "total_time_h",
+            "departure_time",
+            "arrival_time",
             "avg_speed_kmh",
             "n_stops",
             "countries",
