@@ -39,3 +39,32 @@ Stratford International,Stratford International,,51.544,-0.008,corrected,UNITED_
 Ebbsfleet International,Ebbsfleet,,51.443,0.321,corrected,UNITED_KINGDOM,GB,network,infra-2026;infra-2032,possible first stop for an open-access Channel Tunnel operator,add
 Haparanda,Haparanda,,65.828,24.13,corrected,NORDICS,SE,border,infra-2026;infra-2032,"SE/FI border station, break of gauge",add
 Tornio,Tornio,,65.845,24.163,corrected,NORDICS,FI,border,infra-2026;infra-2032,"FI/SE border station, break of gauge",add
+Kristiansand,Kristiansand,,58.1456400,7.9871680,corrected,NORDICS,NO,fua:Kristiansand,infra-2026;infra-2032,feedback from users,add
+Lisboa - Santa Apolónia,Lisboa - Santa Apolónia,,38.7146298,-9.1220425,corrected,IBERIA,PT,fua:Lisboa,infra-2026;infra-2032,feedback from users,add
+Fishguard Harbour,Fishguard Harbour,,52.0106917,-4.9861730,corrected,UNITED_KINGDOM,GB,ferry:Fishguard,infra-2026;infra-2032,feedback from users - ferry to Ireland,add
+Harwich International,Harwich International,,51.9472249,1.2560388,corrected,UNITED_KINGDOM,GB,ferry:Harwich,infra-2026;infra-2032,feedback from users - ferry to the Netherlands,add
+Brixen,Bressanone,,46.7100050,11.6497561,corrected,ITALY,IT,tourism:Alps,infra-2026;infra-2032,feedback from users,add
+Berchtesgaden Hauptbahnhof,Berchtesgaden Hauptbahnhof,,47.6267170,12.9997241,corrected,GERMANY,DE,tourism:Alps,infra-2026;infra-2032,feedback from users,add
+Meran,Merano,,46.6731959,11.1492029,corrected,ITALY,IT,tourism:Alps,infra-2026;infra-2032,feedback from users,add
+Cilli,Cilli,,46.2293889,15.2616828,corrected,SOUTH_EASTERN_EUROPE,SI,fua:Cilli,infra-2026;infra-2032,feedback from users,add
+Kouvola,Kouvola,,60.8656151,26.7045842,corrected,NORDICS,FI,fua:Kouvola,infra-2026;infra-2032,feedback from users,add
+Mikkeli,Mikkeli,,61.6878182,27.2779675,corrected,NORDICS,FI,tourism:lakes,infra-2026;infra-2032,feedback from users,add
+Pieksämäki,Pieksämäki,,62.3012520,27.1675271,corrected,NORDICS,FI,network,infra-2026;infra-2032,feedback from users,add
+Iisalmi,Iisalmi,,63.5602061,27.2010223,corrected,NORDICS,FI,network,infra-2026;infra-2032,feedback from users,add
+Kajaani,Kajaani,,64.2197028,27.7384919,corrected,NORDICS,FI,network,infra-2026;infra-2032,feedback from users,add
+Büchen,Büchen,,53.4750518,10.6231448,corrected,GERMANY,DE,network,infra-2026;infra-2032,feedback from users,add
+Čadca,Čadca,,49.4452459,18.7869396,corrected,SOUTH_EASTERN_EUROPE,SK,fua:Čadca,infra-2026;infra-2032,feedback from users,add
+Massy-Palaiseau,Massy-Palaiseau,,48.7257689,2.2580469,corrected,FRANCE,FR,fua:Massy,infra-2026;infra-2032,feedback from users,add
+Monaco - Monte Carlo,Monaco - Monte Carlo,,43.7382624,7.4194983,corrected,FRANCE,MC,tourism:Alps,infra-2026;infra-2032,feedback from users,add
+Fredericia,Fredericia,,55.5684379,9.7395230,corrected,NORDICS,DK,fua:Fredericia,infra-2026;infra-2032,feedback from users,add
+Schleswig,Schleswig,,54.4995830,9.5378994,corrected,GERMANY,DE,fua:Schleswig,infra-2026;infra-2032,feedback from users,add
+Ostseebad Binz,Ostseebad Binz,,54.4050029,13.6005789,corrected,GERMANY,DE,tourism:Rügen,infra-2026;infra-2032,feedback from users,add
+Vlissingen,Vlissingen,,51.4440529,3.5957220,corrected,IBERIA,NL,ferry:Vlissingen,infra-2026;infra-2032,feedback from users,add
+Den Haag HS,Den Haag Hollands Spoor,, 52.0701372,4.3222758,corrected,IBERIA,NL,fua:Den Haag,infra-2026;infra-2032,feedback from users,add
+Ávila ,Ávila,, 40.6570906,-4.6830022,corrected,IBERIA,ES,tourism:Ávila,infra-2026;infra-2032,feedback from users,add
+Madrid-Príncipe Pío,Madrid-Príncipe Pío,,40.4215987,-3.7190320,corrected,IBERIA,ES,fua:Madrid,infra-2026;infra-2032,feedback from users,add
+Muurola,Muurola,,66.3708078,25.3750295,corrected,NORDICS,FI,network,infra-2026;infra-2032,feedback from users,add
+Tervola,Tervola,,66.0816764,24.7721595,corrected,NORDICS,FI,network,infra-2026;infra-2032,feedback from users,add
+Longueau,Longueau,,49.8635124,2.3523295,corrected,FRANCE,FR,fua:Amiens,infra-2026;infra-2032,feedback from users,add
+Bradford Forster Square,Bradford Forster Square,,53.7974731,-1.7532149,corrected,UNITED_KINGDOM,GB,fua:Bradford,infra-2026;infra-2032,feedback from users,add
+Manchester Victoria,Manchester Victoria,,53.4879748,-2.2424846,corrected,UNITED_KINGDOM,GB,fua:Manchester,infra-2026;infra-2032,feedback from users,add
