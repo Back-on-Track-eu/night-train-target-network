@@ -46,6 +46,7 @@ staleness detection now lives here, internally, for that purpose only.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Optional
 
 from psycopg2.extras import RealDictCursor
@@ -144,6 +145,24 @@ def outdated_trigger(container: dict) -> Optional[dict]:
             "to": container["current_base_scenario_id"],
         }
     return None
+
+
+def _clock_hhmm(value) -> Optional[str]:
+    """A schedule time as "HH:MM", hours NOT wrapped at 24 (the GTFS
+    overnight convention both sources store). Proposal stop_times arrive as
+    INTERVAL (timedelta), ONTD trips as "H:MM"/"HH:MM" text; anything
+    unreadable is None."""
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        minutes = int(value.total_seconds()) // 60
+    else:
+        try:
+            hours, _, rest = str(value).strip().partition(":")
+            minutes = int(hours) * 60 + int(rest[:2])
+        except ValueError:
+            return None
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 class ProposalNotFoundError(Exception):
@@ -1403,8 +1422,62 @@ class ProposalRepository:
                 sql += " LIMIT %s OFFSET %s"
                 page_params += [limit, offset]
             cur.execute(sql, page_params)
-            rows = cur.fetchall()
-        return [dict(row) for row in rows], total
+            rows = [dict(row) for row in cur.fetchall()]
+            self._attach_endpoint_times(cur, rows)
+        return rows, total
+
+    # The clock times a gallery card heads its route with: the first stop's
+    # departure and the last stop's arrival of ONE run, in the direction the
+    # row's stop_ids are listed. Read for the page only, after pagination,
+    # so the union, the count and every filter stay exactly as they were.
+    # Proposals: the earliest outbound (direction 0) trip — stop_ids follow
+    # the outbound run. Existing: the same first active trip by trip_id that
+    # db/ontd/projection.py's fetch_route_stops() takes its stop order from.
+    _PROPOSAL_ENDPOINT_TIMES = (
+        "SELECT DISTINCT ON (t.route_id) t.route_id, "
+        "       first_stop.departure_time, last_stop.arrival_time "
+        "FROM proposals.trips t "
+        "CROSS JOIN LATERAL (SELECT departure_time FROM proposals.stop_times "
+        "                    WHERE trip_id = t.trip_id "
+        "                    ORDER BY stop_sequence LIMIT 1) first_stop "
+        "CROSS JOIN LATERAL (SELECT arrival_time FROM proposals.stop_times "
+        "                    WHERE trip_id = t.trip_id "
+        "                    ORDER BY stop_sequence DESC LIMIT 1) last_stop "
+        "WHERE t.route_id = ANY(%s) AND t.direction_id = 0 "
+        "ORDER BY t.route_id, first_stop.departure_time"
+    )
+    _EXISTING_ENDPOINT_TIMES = (
+        "SELECT DISTINCT ON (route_id) route_id, "
+        "       origin_departure_time AS departure_time, "
+        "       destination_arrival_time AS arrival_time "
+        "FROM ontd.trips WHERE is_active AND route_id = ANY(%s) "
+        "ORDER BY route_id, trip_id"
+    )
+
+    def _attach_endpoint_times(self, cur, rows: list[dict]) -> None:
+        """Set departure_time / arrival_time ("HH:MM", hours past 24 for
+        the next day, None when unknown) on every gallery row in place."""
+        proposal_routes = {
+            f"P{row['proposal_id']}_V{row['proposal_version']}_R1": row
+            for row in rows
+            if row["source"] == "proposal"
+        }
+        existing_routes = {
+            row["route_id"]: row for row in rows if row["source"] == "existing"
+        }
+        for row in rows:
+            row["departure_time"] = row["arrival_time"] = None
+        for sql, by_route in (
+            (self._PROPOSAL_ENDPOINT_TIMES, proposal_routes),
+            (self._EXISTING_ENDPOINT_TIMES, existing_routes),
+        ):
+            if not by_route:
+                continue
+            cur.execute(sql, (list(by_route),))
+            for found in cur.fetchall():
+                row = by_route[found["route_id"]]
+                row["departure_time"] = _clock_hhmm(found["departure_time"])
+                row["arrival_time"] = _clock_hhmm(found["arrival_time"])
 
     def stored_summary(self, proposal_id: int) -> Optional[dict]:
         """One proposal's §5.4 row AS STORED — the cycle figures, with the

@@ -1050,11 +1050,6 @@
   },
   "gallery": {
     "heading": "Bringen wir die Nachtzüge zurück aufs Gleis!",
-    "tabs": {
-      "station": "Nach Bahnhof",
-      "city": "Nach Stadt",
-      "country": "Nach Land"
-    },
     "kind": {
       "label": "Suchart",
       "via": "Über",
@@ -1068,16 +1063,19 @@
       "from": "Von",
       "to": "Nach",
       "toLower": "nach",
-      "station": "Bahnhof",
       "stationPlaceholder": "Zum Auswählen eines Bahnhofs klicken",
-      "city": "Stadt",
       "cityPlaceholder": "Zum Auswählen einer Stadt klicken",
-      "country": "Land",
       "countryPlaceholder": "Zum Auswählen eines Landes klicken",
       "clear": "{field} zurücksetzen",
-      "noCountries": "Keine Länder gefunden",
-      "noCities": "Keine Städte gefunden",
-      "button": "Suchen"
+      "place": "Ort",
+      "placePlaceholder": "Bahnhof, Stadt oder Land",
+      "noPlaces": "Keine Orte gefunden",
+      "groups": {
+        "country": "Länder",
+        "city": "Städte",
+        "station": "Bahnhöfe"
+      },
+      "swap": "Von und nach tauschen"
     },
     "welcome": {
       "pitch": {
@@ -1087,7 +1085,7 @@
       },
       "source": "unsere Berichte und Studien",
       "browse": "Vorschläge anderer ansehen",
-      "suggestComposition": "Neue Zugbildung vorschlagen",
+      "suggestComposition": "Zug vorschlagen",
       "about": "Über das Projekt"
     },
     "section": {
@@ -1096,21 +1094,29 @@
     },
     "matching": "{count} Strecke gefunden | {count} Strecken gefunden",
     "source": {
-      "all": "Alle Strecken",
+      "all": "Beide",
       "proposal": "Vorschläge",
       "existing": "Bestehend",
       "label": "Quelle"
     },
-    "show": {
-      "label": "Anzeigen"
-    },
     "filter": {
       "label": "Wessen Strecken",
-      "all": "Alle",
+      "all": "Von allen",
       "mine": "Meine",
       "disabledHint": "Bestehende Verbindungen haben keinen Urheber — auf Vorschläge wechseln, um deine zu sehen.",
       "typical": "Typische Nachtzüge",
       "typicalHint": "Vorschläge mit {minKm}–{maxKm} km einfacher Fahrt, {minH}–{maxH} h und im Schnitt mindestens {minKmh} km/h – der Rahmen unseres Positionspapiers. Bestehende Züge werden immer gezeigt. Ausschalten zeigt alle Vorschläge."
+    },
+    "filters": {
+      "open": "Filter",
+      "title": "Filter",
+      "close": "Schließen",
+      "reset": "Zurücksetzen",
+      "show": "{count} Strecke anzeigen | {count} Strecken anzeigen",
+      "length": "Streckenlänge",
+      "adjust": "Entfernung, Dauer, Geschwindigkeit, Halte anpassen",
+      "back": "Zurück",
+      "figuresNote": "Ändert die bei Vorschlägen gezeigten Kosten und Einsparungen, nicht welche Strecken aufgeführt werden."
     },
     "distribution": {
       "title": "Bereichsfilter",
@@ -1131,9 +1137,6 @@
       "any": "beliebig",
       "lowerHandle": "Untere Grenze",
       "upperHandle": "Obere Grenze",
-      "inEffect": "Aktive Bereiche:",
-      "none": "keine – alle Vorschläge",
-      "clear": "Diesen Bereich löschen",
       "bin": "{from}–{to} {unit}",
       "binOpen": "ab {from} {unit}",
       "binCounts": "{proposals} Vorschläge · {existing} bestehend",
@@ -1141,14 +1144,13 @@
       "unknownExisting": "{count} bestehender Zug ohne Kennzahlen | {count} bestehende Züge ohne Kennzahlen",
       "loading": "Verteilung wird geladen …",
       "failed": "Die Verteilung konnte nicht geladen werden.",
-      "custom": "Eigene Bereiche"
+      "anyLength": "Jede Länge",
+      "clearAll": "Alle Bereiche löschen"
     },
     "scenario": {
-      "label": "Szenario",
-      "applied": "Werte in diesem Szenario",
+      "label": "Zahlen für",
       "hint": "Jeder Vorschlag wird in jedem Szenario bewertet. Werte, Sortierung und Karte unten folgen Deiner Auswahl. Bestehende Verbindungen werden immer so gezeigt, wie sie heute fahren.",
       "withoutFigures": "{count} Strecke hier ohne Werte | {count} Strecken hier ohne Werte",
-      "proposalsOnly": "nur Vorschläge",
       "disabledHint": "Das Szenario gilt nur für Vorschläge — bestehende Verbindungen werden so gezeigt, wie sie heute fahren."
     },
     "sort": {
@@ -1187,9 +1189,8 @@
       "guest": "Gast",
       "existing": "Bestehend",
       "km": "{value} km",
-      "stops": "({count} Halt) | ({count} Halte)",
-      "co2PerYear": "{value} t CO₂e/Jahr",
-      "demandPerYear": "{value} Reisen/Jahr",
+      "tonnes": "{value} t",
+      "stops": "{count} Halt | {count} Halte",
       "like": "Like",
       "loginToLike": "Zum Liken von Vorschlägen mit einem Konto anmelden.",
       "stat": {
@@ -1222,10 +1223,17 @@
           "body": "Öffentliche Mittel je Tonne CO₂e, die diese Strecke vermeidet — die jährliche Subvention geteilt durch die jährliche Einsparung. Je niedriger, desto mehr Klimawirkung pro Euro. Alle Preise sind auf das Preisniveau 2032 hochgerechnet (inflationsbereinigt)."
         }
       },
+      "label": {
+        "distance": "Entfernung",
+        "speed": "Ø-Geschwindigkeit",
+        "composition": "Zugbildung",
+        "demand": "Fahrten pro Jahr",
+        "co2": "CO₂e gespart pro Jahr",
+        "subsidyPerTCo2": "Subvention je t CO₂e"
+      },
       "comments": "Kommentare lesen",
       "created": "Erstellt {date}",
       "updated": "aktualisiert {date}",
-      "subsidyPerTCo2": "{value}/t CO₂e",
       "notEvaluable": "In diesem Szenario nicht bewertbar.",
       "notYetEvaluated": "In diesem Szenario noch nicht bewertet."
     },

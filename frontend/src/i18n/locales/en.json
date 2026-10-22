@@ -1050,11 +1050,6 @@
   },
   "gallery": {
     "heading": "Bring the night trains back on track!",
-    "tabs": {
-      "station": "By station",
-      "city": "By city",
-      "country": "By country"
-    },
     "kind": {
       "label": "Search kind",
       "via": "Via",
@@ -1068,16 +1063,19 @@
       "from": "From",
       "to": "To",
       "toLower": "to",
-      "station": "Station",
       "stationPlaceholder": "Click to select a station",
-      "city": "City",
       "cityPlaceholder": "Click to select a city",
-      "country": "Country",
       "countryPlaceholder": "Click to select a country",
       "clear": "Clear {field}",
-      "noCountries": "No countries found",
-      "noCities": "No cities found",
-      "button": "Search"
+      "place": "Place",
+      "placePlaceholder": "Station, city or country",
+      "noPlaces": "No places found",
+      "groups": {
+        "country": "Countries",
+        "city": "Cities",
+        "station": "Stations"
+      },
+      "swap": "Swap from and to"
     },
     "welcome": {
       "pitch": {
@@ -1087,7 +1085,7 @@
       },
       "source": "our reports and studies",
       "browse": "See other people's suggestions",
-      "suggestComposition": "Suggest a new composition",
+      "suggestComposition": "Suggest a train",
       "about": "About"
     },
     "section": {
@@ -1096,21 +1094,29 @@
     },
     "matching": "Found {count} route | Found {count} routes",
     "source": {
-      "all": "All routes",
+      "all": "Both",
       "proposal": "Proposals",
       "existing": "Existing",
       "label": "Source"
     },
-    "show": {
-      "label": "Show"
-    },
     "filter": {
       "label": "Whose routes",
-      "all": "All",
+      "all": "Everyone’s",
       "mine": "Mine",
       "disabledHint": "Existing connections have no owner — switch to proposals to see yours.",
       "typical": "Typical night trains",
       "typicalHint": "Proposals of one way {minKm}–{maxKm} km, {minH}–{maxH} h and at least {minKmh} km/h on average — the range of our position paper. Existing trains are always shown. Switch off to see every proposal."
+    },
+    "filters": {
+      "open": "Filters",
+      "title": "Filters",
+      "close": "Close",
+      "reset": "Reset",
+      "show": "Show {count} route | Show {count} routes",
+      "length": "Route length",
+      "adjust": "Adjust distance, duration, speed, stops",
+      "back": "Back",
+      "figuresNote": "Changes the costs and savings shown on proposals, not which routes are listed."
     },
     "distribution": {
       "title": "Range filters",
@@ -1131,9 +1137,6 @@
       "any": "any",
       "lowerHandle": "Lower bound",
       "upperHandle": "Upper bound",
-      "inEffect": "Ranges in effect:",
-      "none": "none — every proposal",
-      "clear": "Clear this range",
       "bin": "{from}–{to} {unit}",
       "binOpen": "{from}+ {unit}",
       "binCounts": "{proposals} proposals · {existing} existing",
@@ -1141,14 +1144,13 @@
       "unknownExisting": "{count} existing train without figures | {count} existing trains without figures",
       "loading": "Loading distribution…",
       "failed": "The distribution couldn't be loaded.",
-      "custom": "Custom ranges"
+      "anyLength": "Any length",
+      "clearAll": "Clear all ranges"
     },
     "scenario": {
-      "label": "Scenario",
-      "applied": "figures on this scenario",
+      "label": "Figures for",
       "hint": "Every suggestion is evaluated on each scenario, so the figures, the sorting and the map below follow the one you pick here. Existing connections are shown as they run today, whatever you choose.",
       "withoutFigures": "{count} route without figures here | {count} routes without figures here",
-      "proposalsOnly": "proposals only",
       "disabledHint": "The scenario applies to proposals only — existing connections are shown as they run today."
     },
     "sort": {
@@ -1187,9 +1189,8 @@
       "guest": "Guest",
       "existing": "Existing",
       "km": "{value} km",
-      "stops": "({count} stop) | ({count} stops)",
-      "co2PerYear": "{value} t CO₂e/yr",
-      "demandPerYear": "{value} trips/yr",
+      "tonnes": "{value} t",
+      "stops": "{count} stop | {count} stops",
       "like": "Like",
       "loginToLike": "Log in with an account to like proposals.",
       "stat": {
@@ -1222,10 +1223,17 @@
           "body": "Public money needed per tonne of CO₂e this route avoids — the annual subsidy divided by the annual saving. The lower it is, the more climate effect each euro buys. All prices are scaled to 2032 price levels (inflation-adjusted)."
         }
       },
+      "label": {
+        "distance": "Distance",
+        "speed": "Average speed",
+        "composition": "Composition",
+        "demand": "Trips per year",
+        "co2": "CO₂e saved per year",
+        "subsidyPerTCo2": "Subsidy per t CO₂e"
+      },
       "comments": "Read the comments",
       "created": "Created {date}",
       "updated": "updated {date}",
-      "subsidyPerTCo2": "{value}/t CO₂e",
       "notEvaluable": "Cannot be evaluated on this scenario.",
       "notYetEvaluated": "Not yet evaluated on this scenario."
     },

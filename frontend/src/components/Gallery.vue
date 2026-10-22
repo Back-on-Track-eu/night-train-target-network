@@ -16,36 +16,41 @@ import Skeleton from 'primevue/skeleton'
 import {
   mdiAccountOutline,
   mdiArrowRight,
+  mdiChevronLeft,
+  mdiChevronRight,
   mdiCityVariantOutline,
+  mdiClose,
   mdiMapMarkerOutline,
   mdiEarth,
-  mdiMagnify,
   mdiPlus,
   mdiSortAscending,
   mdiSortDescending,
+  mdiSwapHorizontal,
+  mdiTuneVariant,
 } from '@mdi/js'
 import AppIcon from '@/components/AppIcon.vue'
 import AppSpinner from '@/components/AppSpinner.vue'
 import LandingIntro from '@/components/LandingIntro.vue'
-import StopSelect from '@/components/StopSelect.vue'
 import OptionSelect, { type SelectOption } from '@/components/OptionSelect.vue'
 import SearchField from '@/components/SearchField.vue'
 import ProposalCard from '@/components/ProposalCard.vue'
 import GalleryScenarioPanel from '@/components/GalleryScenarioPanel.vue'
+import ScenarioSwitches from '@/components/ScenarioSwitches.vue'
 import GalleryMap from '@/components/GalleryMap.vue'
 import GalleryDistribution from '@/components/GalleryDistribution.vue'
+import GalleryRangesChip from '@/components/GalleryRangesChip.vue'
 import { useStore } from '@/stores/store'
 import { useLocaleFormat } from '@/composables/useLocaleFormat'
 import { LG_MEDIA_QUERY, useMediaQuery } from '@/composables/useMediaQuery'
 import { fetchDistributions, fetchMapCorridors, fetchProposals } from '@/lib/proposalsApi'
 import { createAbortSlot } from '@/lib/apiClient'
 import { ctaButtonClass } from '@/lib/ctaButtonClass'
+import { docsFeedbackUrl, FEEDBACK_TOPIC_MISSING_STOP } from '@/lib/feedbackLink'
 import { selectPillPt } from '@/lib/selectPillPt'
 import { asApiFailure, isRetryable, type ApiFailure } from '@/lib/apiError'
 import { stopMarkers, type GalleryRowRef, type GalleryStopMarker } from '@/lib/galleryMap'
 import {
   SEARCH_KINDS,
-  SEARCH_TABS,
   activePicks,
   anchorStopIds,
   cityOptions,
@@ -55,6 +60,7 @@ import {
   type GallerySearchTab,
 } from '@/lib/gallerySearch'
 import {
+  isTypicalNightTrain,
   rangesFromQuery,
   rangesToFilter,
   rangesToQuery,
@@ -62,6 +68,7 @@ import {
   type GalleryRanges,
 } from '@/lib/galleryRanges'
 import { entersAtGallery, GALLERY_HASH } from '@/lib/galleryEntry'
+import { TYPICAL_NIGHT_TRAIN } from '@/lib/typicalNightTrain'
 import { useApiFailure } from '@/composables/useApiFailure'
 import {
   seedToQuery,
@@ -87,7 +94,7 @@ import {
 
 const { t, locale } = useI18n()
 const store = useStore()
-const { countryName } = useLocaleFormat()
+const { countryName, formatInt } = useLocaleFormat()
 const route = useRoute()
 const router = useRouter()
 const { describe, report } = useApiFailure()
@@ -103,8 +110,11 @@ const LIMIT = 20
 const PAGE_SECTIONS: ProposalsSection[] = ['summaries', 'map_routes']
 
 // The search bar: one TAB (station / city / country), one KIND (via = one
-// place, from → to = two), and the picks per tab — kept for every tab, not
-// only the active one, so switching tabs and back keeps a selection.
+// place, from → to = two), and the picks per tab. There are no tabs on
+// screen any more: one field lists every kind of place, and picking one sets
+// the tab (see pickPlace). The model keeps its tabs because the backend's
+// filter and the link format are per kind — and a pair is two places of the
+// same kind, which is all the backend offers.
 // lib/gallerySearch.ts maps the active tab's picks to the request filter.
 const tab = ref<GallerySearchTab>('station')
 const kind = ref<GallerySearchKind>('via')
@@ -200,22 +210,14 @@ const TAB_ICONS: Record<GallerySearchTab, string> = {
   city: mdiCityVariantOutline,
   country: mdiEarth,
 }
-const tabs = computed(() =>
-  SEARCH_TABS.map((value) => ({
-    value,
-    label: t(`gallery.tabs.${value}`),
-    icon: TAB_ICONS[value],
-  })),
-)
 const kinds = computed(() =>
   SEARCH_KINDS.map((value) => ({ value, label: t(`gallery.kind.${value}`) })),
 )
 const fromTo = computed(() => kind.value === 'fromTo')
-// The field labels: the place noun for "via", From / To for a pair.
+// The field labels: "Place" for "via", From / To for a pair.
 const fieldLabelA = computed(() =>
-  fromTo.value ? t('gallery.search.from') : t(`gallery.search.${tab.value}`),
+  fromTo.value ? t('gallery.search.from') : t('gallery.search.place'),
 )
-const fieldPlaceholder = computed(() => t(`gallery.search.${tab.value}Placeholder`))
 
 // Existing trains alone on screen: neither the scenario (they run as they run
 // today) nor ownership (nobody owns them) applies, so both controls grey out
@@ -234,10 +236,19 @@ const mineOnly = ref(false)
 // into the account, so nothing is lost by asking.
 const canFilterMine = computed(() => store.authChoice === 'user')
 
-// The two halves of the ownership switch, as one pair of class strings rather
-// than a literal in each button.
-const activeOwnerClass = 'bg-primary-50/15 text-primary-50 font-semibold'
-const inactiveOwnerClass = 'text-primary-50/60 hover:text-primary-50'
+// Whose routes, as one pill-select in the chip row ("Everyone's" / "Mine").
+// Picking "mine" goes through selectMine, which may ask for an account first.
+const whoseOptions = computed(() => [
+  { value: 'all', label: t('gallery.filter.all') },
+  { value: 'mine', label: t('gallery.filter.mine') },
+])
+const whose = computed<string>({
+  get: () => (mineOnly.value ? 'mine' : 'all'),
+  set: (value) => {
+    if (value === 'mine') selectMine()
+    else mineOnly.value = false
+  },
+})
 
 // The four range filters the distribution panel edits (lib/galleryRanges.ts:
 // distance, duration, average speed, stops), asked of PROPOSALS only —
@@ -335,8 +346,9 @@ type SourceChoice = 'all' | ProposalSourceKind
 const DEFAULT_SOURCE: SourceChoice = 'proposal'
 const SOURCE_CHOICES: readonly SourceChoice[] = ['all', 'proposal', 'existing']
 const sourceFilter = ref<SourceChoice>(DEFAULT_SOURCE)
+// On screen in this order: the default first, "both" last.
 const sourceOptions = computed(() =>
-  SOURCE_CHOICES.map((value) => ({
+  (['proposal', 'existing', 'all'] as const).map((value) => ({
     value,
     label: t(`gallery.source.${value}`),
   })),
@@ -460,6 +472,71 @@ const cityPickerOptions = computed<SelectOption[]>(() =>
 const cityById = (key: string): CityOption | null =>
   cities.value.find((c) => String(c.osm_id) === key) ?? null
 
+// Every station, the same search text StopSelect.vue builds (names in every
+// catalogue language, so "Monaco" finds München Hbf on the English UI too)
+// and its "city · country" second line.
+const stationPickerOptions = computed<SelectOption[]>(() =>
+  store.stops.map((s) => {
+    const city = s.city ? s.city.names[locale.value] || s.city.names.en || s.city.name : ''
+    const country = s.country_names?.[locale.value] || s.country_names?.en || s.country_code
+    const parts = [s.name, s.name_latin, s.name_ascii, country]
+    if (s.city) parts.push(s.city.name, ...Object.values(s.city.names))
+    if (s.country_names) parts.push(...Object.values(s.country_names))
+    return {
+      key: s.stop_id,
+      label: s.name,
+      subtitle: city ? `${city} \u00b7 ${country}` : country,
+      haystack: parts.filter(Boolean).join('\u0000').toLowerCase(),
+    }
+  }),
+)
+
+// The one place field's options: countries, cities, stations, each under its
+// heading, keyed "tab:id". A pair is two places of one kind, so while the
+// OTHER field of a pair holds a pick, this one offers only that kind.
+const PLACE_TABS: readonly GallerySearchTab[] = ['country', 'city', 'station']
+function placeOptions(slot: 0 | 1): SelectOption[] {
+  const other = fromTo.value && pickLabel(slot === 0 ? 1 : 0) !== null
+  const byTab: Record<GallerySearchTab, SelectOption[]> = {
+    country: countryOptions.value,
+    city: cityPickerOptions.value,
+    station: stationPickerOptions.value,
+  }
+  return PLACE_TABS.filter((kindOfPlace) => !other || kindOfPlace === tab.value).flatMap(
+    (kindOfPlace) =>
+      byTab[kindOfPlace].map((o) => ({
+        ...o,
+        key: `${kindOfPlace}:${o.key}`,
+        group: t(`gallery.search.groups.${kindOfPlace}`),
+      })),
+  )
+}
+// Placeholder of a field: any kind of place, or the kind the pair is in.
+function placePlaceholder(slot: 0 | 1): string {
+  const other = fromTo.value && pickLabel(slot === 0 ? 1 : 0) !== null
+  return other ? t(`gallery.search.${tab.value}Placeholder`) : t('gallery.search.placePlaceholder')
+}
+// A pick of another kind than the current tab starts the search over in that
+// kind — the picks of the old one would otherwise come back with it.
+function pickPlace(slot: 0 | 1, key: string): void {
+  const sep = key.indexOf(':')
+  const kindOfPlace = key.slice(0, sep) as GallerySearchTab
+  const id = key.slice(sep + 1)
+  if (kindOfPlace !== tab.value) {
+    stopA.value = stopB.value = null
+    cityA.value = cityB.value = null
+    countryA.value = countryB.value = null
+    tab.value = kindOfPlace
+  }
+  if (kindOfPlace === 'station') {
+    ;[stopA, stopB][slot].value = store.stops.find((s) => s.stop_id === id) ?? null
+  } else if (kindOfPlace === 'city') {
+    ;[cityA, cityB][slot].value = cityById(id)
+  } else {
+    ;[countryA, countryB][slot].value = id
+  }
+}
+
 // What each field shows, and what the chip on the map repeats.
 const pickLabel = (slot: 0 | 1): string | null => {
   if (tab.value === 'station') return [stopA, stopB][slot].value?.name ?? null
@@ -483,6 +560,33 @@ const searchSummary = computed(() => {
       : t('gallery.map.highlight.via', { place })
   return { icon: TAB_ICONS[tab.value], text }
 })
+// From and to change places. The filter is the same either way (both places
+// touched, in either direction); the swap is for the reader's own sense of
+// the trip, and for the builder, which the pair prefills in this order.
+function swapPicks(): void {
+  ;[stopA.value, stopB.value] = [stopB.value, stopA.value]
+  ;[cityA.value, cityB.value] = [cityB.value, cityA.value]
+  ;[countryA.value, countryB.value] = [countryB.value, countryA.value]
+}
+// Whose routes as the bar's last suffix, on a desktop: the pill-select's
+// options, without its border — the rule before it separates it.
+const whoseBarPt = {
+  ...selectPillPt,
+  root: {
+    class:
+      'flex h-11 cursor-pointer items-center rounded-full bg-transparent transition hover:bg-primary-50/10',
+  },
+}
+// The kind switch as a "Via ▾" menu at the start of the field, on a phone.
+const kindMenuPt = {
+  ...selectPillPt,
+  root: {
+    class:
+      'flex h-11 shrink-0 cursor-pointer items-center border-r border-primary-50/15 pl-3 bg-transparent',
+  },
+  label: { class: 'text-sm font-semibold text-primary-50 leading-none' },
+  dropdown: { class: 'flex items-center px-2 text-primary-50/60' },
+}
 function clearPick(slot: 0 | 1): void {
   if (tab.value === 'station') [stopA, stopB][slot].value = null
   else if (tab.value === 'city') [cityA, cityB][slot].value = null
@@ -495,6 +599,59 @@ const currentSort = computed<ProposalSort>(() => ({
 }))
 
 const reachedEnd = computed(() => initialized.value && proposals.value.length >= total.value)
+
+// "Reset" shows only once a filter differs from what the gallery opens on:
+// no place, proposals, everyone's, the typical night trains. Sort and
+// scenario are not filters — they change the order and the figures, never
+// which routes are listed.
+const filtersAtDefault = computed(
+  () =>
+    pickLabel(0) === null &&
+    pickLabel(1) === null &&
+    sourceFilter.value === DEFAULT_SOURCE &&
+    !mineOnly.value &&
+    isTypicalNightTrain(ranges.value),
+)
+function resetFilters(): void {
+  stopA.value = stopB.value = null
+  cityA.value = cityB.value = null
+  countryA.value = countryB.value = null
+  tab.value = 'station'
+  kind.value = 'via'
+  sourceFilter.value = DEFAULT_SOURCE
+  mineOnly.value = false
+  ranges.value = typicalNightTrainRanges()
+}
+
+// The range panel: opened under the search bar on a desktop — it costs the map
+// its height (measureRow) only while the reader is actually editing — and in
+// the Filters sheet on a phone (below lg the chip row gives way to one
+// Filters button).
+const rangesOpen = ref(false)
+const filtersOpen = ref(false)
+// Which screen of the Filters sheet is up: the overview, or one of the two
+// that need room of their own. Every opening starts on the overview.
+const sheetView = ref<'main' | 'ranges' | 'scenario'>('main')
+function openFilters(): void {
+  sheetView.value = 'main'
+  filtersOpen.value = true
+}
+const sheetHeadingClass = 'text-xs font-semibold tracking-wider text-primary-50/60 uppercase'
+
+// The sheet's preset switch — the same preset GalleryDistribution's pill
+// toggles: on is "the ranges equal it", off clears every range.
+const typicalOn = computed(() => isTypicalNightTrain(ranges.value))
+function toggleTypical(): void {
+  ranges.value = typicalOn.value ? {} : typicalNightTrainRanges()
+}
+const typicalValues = computed(() => {
+  const n = TYPICAL_NIGHT_TRAIN
+  return [
+    `${formatInt(n.distanceKm.min)}–${formatInt(n.distanceKm.max)} km`,
+    `${n.timeH.min}–${n.timeH.max} h`,
+    `≥ ${n.avgSpeedKmh.min} km/h`,
+  ].join(' · ')
+})
 
 // Map the search bar + switches to a backend filter. The search bar's part
 // lives in lib/gallerySearch.ts (searchFilter), where it is tested.
@@ -1043,162 +1200,22 @@ onActivated(() => {
          and the pitch above has already introduced the page. -->
     <div
       ref="gallerySection"
-      class="mt-2 flex w-full flex-wrap items-baseline justify-center gap-x-3 border-t border-primary-50/10 pt-6"
+      class="mt-2 flex w-full flex-col gap-4 border-t border-primary-50/10 pt-6 lg:flex-row lg:items-center lg:justify-between"
     >
-      <h2 class="text-2xl font-light text-primary-50">
-        {{ t('gallery.section.title') }}
-      </h2>
-      <p class="text-sm text-primary-50/60">
-        {{ t('gallery.section.subtitle') }}
-      </p>
-    </div>
-
-    <!-- Search bar. `relative z-10` gives the mode tabs and the pill dropdowns a
-         stacking context of their own, so neither the intro above nor the
-         sticky map column beside them can paint over the controls. -->
-    <div class="relative z-10 flex flex-col items-center gap-3">
-      <!-- Place tabs: one hairline-divided pill from sm up, a row of three
-           below it too (three short labels fit a phone). A label never wraps. -->
-      <div
-        class="flex w-full justify-center divide-x divide-primary-50/20 overflow-hidden rounded-full sm:w-auto"
-      >
-        <button
-          v-for="item in tabs"
-          :key="item.value"
-          type="button"
-          class="flex cursor-pointer items-center justify-center gap-1.5 px-2 py-2 text-sm leading-none whitespace-nowrap transition sm:px-4"
-          :class="
-            tab === item.value
-              ? 'text-primary-50 font-bold'
-              : 'text-primary-50/60 hover:text-primary-50/100'
-          "
-          @click="tab = item.value"
-        >
-          <AppIcon :path="item.icon" :size="16" />
-          {{ item.label }}
-        </button>
+      <div class="flex flex-wrap items-baseline justify-center gap-x-3 lg:justify-start">
+        <h2 class="text-2xl font-light text-primary-50">
+          {{ t('gallery.section.title') }}
+        </h2>
+        <p class="text-sm text-primary-50/60">
+          {{ t('gallery.section.subtitle') }}
+        </p>
       </div>
 
-      <!-- Input pill — the kind switch, then one field or two. A row from sm
-           up; on a phone the fields stack full-width (SearchField drops its
-           fixed width there, and items-stretch is what hands it the pill's
-           width), the divider turns into a rule between them and the search
-           button becomes a labelled full-width row rather than an icon on its
-           own. -->
+      <!-- What to browse: suggested routes, the existing ONTD network, or
+           both — always in view, never behind a menu: on a phone a row of its
+           own under the heading, on a desktop at the heading's right end. -->
       <div
-        class="flex w-full flex-col items-stretch gap-1 rounded-3xl border border-primary-50/20 bg-primary-50/5 p-1.5 shadow-lg sm:w-auto sm:flex-row sm:items-center sm:rounded-full sm:py-1.5 sm:pl-1.5 sm:pr-1.5"
-      >
-        <!-- Via (one place) or from → to (two). The same switch on every tab,
-             so the four old tabs collapse into three places × two kinds. -->
-        <div
-          class="flex shrink-0 self-start rounded-full border border-primary-50/20 p-0.5 sm:self-auto"
-          role="group"
-          :aria-label="t('gallery.kind.label')"
-        >
-          <button
-            v-for="item in kinds"
-            :key="item.value"
-            type="button"
-            class="flex cursor-pointer items-center gap-1 rounded-full px-3 py-1.5 text-sm leading-none whitespace-nowrap transition"
-            :class="
-              kind === item.value
-                ? 'bg-primary-50/10 font-bold text-primary-50'
-                : 'text-primary-50/60 hover:text-primary-50'
-            "
-            :aria-pressed="kind === item.value"
-            @click="kind = item.value"
-          >
-            <template v-if="item.value === 'fromTo'">
-              {{ t('gallery.search.from') }}
-              <AppIcon :path="mdiArrowRight" :size="14" />
-              {{ t('gallery.search.toLower') }}
-            </template>
-            <template v-else>{{ item.label }}</template>
-          </button>
-        </div>
-
-        <!-- Field A, and field B for a pair. The picker follows the tab; the
-             SearchField inside is the same for all three. -->
-        <template v-for="slot in fromTo ? [0, 1] : [0]" :key="slot">
-          <div v-if="slot === 1" class="h-px w-full bg-primary-50/15 sm:h-8 sm:w-px"></div>
-          <StopSelect
-            v-if="tab === 'station'"
-            :stops="store.stops"
-            :status="store.stopsStatus"
-            @select="slot === 0 ? (stopA = $event) : (stopB = $event)"
-            @retry="store.fetchStops()"
-          >
-            <SearchField
-              :label="slot === 0 ? fieldLabelA : t('gallery.search.to')"
-              :value="slot === 0 ? labelA : labelB"
-              :placeholder="fieldPlaceholder"
-              @clear="clearPick(slot as 0 | 1)"
-            />
-          </StopSelect>
-          <OptionSelect
-            v-else-if="tab === 'city'"
-            :options="cityPickerOptions"
-            :placeholder="fieldPlaceholder"
-            :empty-text="t('gallery.search.noCities')"
-            @select="slot === 0 ? (cityA = cityById($event)) : (cityB = cityById($event))"
-          >
-            <SearchField
-              :label="slot === 0 ? fieldLabelA : t('gallery.search.to')"
-              :value="slot === 0 ? labelA : labelB"
-              :placeholder="fieldPlaceholder"
-              @clear="clearPick(slot as 0 | 1)"
-            />
-          </OptionSelect>
-          <OptionSelect
-            v-else
-            :options="countryOptions"
-            :placeholder="fieldPlaceholder"
-            :empty-text="t('gallery.search.noCountries')"
-            @select="slot === 0 ? (countryA = $event) : (countryB = $event)"
-          >
-            <SearchField
-              :label="slot === 0 ? fieldLabelA : t('gallery.search.to')"
-              :value="slot === 0 ? labelA : labelB"
-              :placeholder="fieldPlaceholder"
-              @clear="clearPick(slot as 0 | 1)"
-            />
-          </OptionSelect>
-        </template>
-
-        <!-- Search button. The label is spoken on every screen and shown only
-             on a phone, where a lone glyph at the foot of a stacked pill
-             reads as decoration. -->
-        <button
-          type="button"
-          class="flex cursor-pointer items-center justify-center gap-2 rounded-full bg-primary-50/10 px-4 py-2.5 text-sm text-primary-50 transition hover:bg-primary-50/20 sm:p-3"
-          :aria-label="t('gallery.search.button')"
-          @click="resetAndLoad"
-        >
-          <AppIcon :path="mdiMagnify" :size="20" />
-          <span class="sm:sr-only">{{ t('gallery.search.button') }}</span>
-        </button>
-      </div>
-      <!-- What the kind means, in one line — "from → to" is both places touched,
-           in either direction, which a reader would otherwise take for end
-           points. -->
-      <p class="px-4 text-center text-xs text-primary-50/50">
-        {{ t(`gallery.kind.hint.${kind}`) }}
-      </p>
-    </div>
-
-    <!-- What to show: the source switch and the ownership switch, up here
-         with the other things that narrow the list (the search above, the
-         ranges and the scenario below) rather than at the head of the result
-         column, which now only sorts and counts (decided 2026-10-04). Source
-         is a segmented switch like ownership: three short labels need no
-         dropdown. -->
-    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-sm">
-      <span class="text-primary-50/60">{{ t('gallery.show.label') }}</span>
-      <!-- Suggested routes and the existing ONTD network are two different
-           kinds of thing sharing one list; this separates them, and narrows
-           the sort fields to the ones ONTD rows actually carry. -->
-      <div
-        class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5"
+        class="mx-auto grid w-full max-w-md grid-cols-3 gap-1 rounded-full bg-primary-50/[0.06] p-1 lg:mx-0 lg:w-auto"
         role="group"
         :aria-label="t('gallery.source.label')"
       >
@@ -1206,80 +1223,483 @@ onActivated(() => {
           v-for="option in sourceOptions"
           :key="option.value"
           type="button"
-          class="cursor-pointer rounded-full px-3 py-1 whitespace-nowrap transition"
-          :class="sourceFilter === option.value ? activeOwnerClass : inactiveOwnerClass"
+          class="min-h-10 cursor-pointer rounded-full px-3 text-sm whitespace-nowrap transition lg:px-5"
+          :class="
+            sourceFilter === option.value
+              ? 'bg-primary-50/15 font-semibold text-primary-50'
+              : 'text-primary-50/65 hover:text-primary-50'
+          "
           :aria-pressed="sourceFilter === option.value"
           @click="sourceFilter = option.value"
         >
           {{ option.label }}
         </button>
       </div>
-      <!-- Whose routes. Always on screen, whatever the source switch or the
-           sign-in state says: hiding it for signed-out readers made it a
-           control nobody could find. Greyed, not hidden, while existing trains
-           alone are listed: nobody owns an ONTD row, and a switch that vanished
-           with the source would be a switch nobody could find again. Picking
-           "mine" while the list shows existing trains alone moves the source
-           switch with it. -->
+    </div>
+
+    <!-- Search bar. `relative z-10` gives the pill dropdowns a stacking
+         context of their own, so neither the intro above nor the sticky map
+         column beside them can paint over the controls. -->
+    <div class="relative z-10 flex flex-col items-center gap-2 lg:items-stretch">
+      <!-- One bar: the kind switch inside it on the left, then one field or
+           two. From sm up a row — the Via | From → to switch, the place (a
+           search glyph, or "From" / "To" with a swap between a pair) — wider
+           for a pair. From lg up it spans the page and ends on the other
+           filters, the route length and whose routes, after a rule each. On a
+           phone the switch is a "Via ▾" menu at the start of the field, a
+           pair's "To" takes a second row under a rule, and the other filters
+           live in the Filters sheet. No search button: every pick reloads the
+           list by itself. -->
       <div
-        class="flex items-center gap-0.5 rounded-full border border-primary-50/20 p-0.5 transition-opacity"
-        :class="existingOnly ? 'opacity-40' : ''"
-        role="group"
-        :aria-label="t('gallery.filter.label')"
-        :aria-disabled="existingOnly"
-        :title="existingOnly ? t('gallery.filter.disabledHint') : undefined"
+        class="flex w-full flex-col rounded-[1.75rem] border border-primary-50/20 bg-primary-50/[0.04] p-1 sm:flex-row sm:items-center sm:gap-1 sm:rounded-full sm:p-1.5 lg:max-w-none"
+        :class="fromTo ? 'sm:max-w-[58.75rem]' : 'sm:max-w-[47.5rem]'"
       >
+        <!-- The switch and the first field share a row on a phone; from sm up
+             they are items of the bar itself (contents), so a pair's two
+             fields split what the switch leaves evenly. -->
+        <div class="flex min-w-0 flex-1 items-center gap-1 sm:contents">
+          <!-- Via (one place) or from → to (two), for every kind of place. -->
+          <div
+            class="hidden h-11 shrink-0 gap-0.5 rounded-full bg-primary-50/[0.07] p-1 sm:flex"
+            role="group"
+            :aria-label="t('gallery.kind.label')"
+          >
+            <button
+              v-for="item in kinds"
+              :key="item.value"
+              type="button"
+              class="flex cursor-pointer items-center gap-1 rounded-full px-4 text-sm whitespace-nowrap transition"
+              :class="
+                kind === item.value
+                  ? 'bg-primary-50/[0.18] font-semibold text-white'
+                  : 'text-primary-50/70 hover:text-primary-50'
+              "
+              :aria-pressed="kind === item.value"
+              @click="kind = item.value"
+            >
+              <template v-if="item.value === 'fromTo'">
+                {{ t('gallery.search.from') }}
+                <AppIcon :path="mdiArrowRight" :size="14" />
+                {{ t('gallery.search.toLower') }}
+              </template>
+              <template v-else>{{ item.label }}</template>
+            </button>
+          </div>
+          <Select
+            v-model="kind"
+            :options="kinds"
+            option-value="value"
+            option-label="label"
+            :aria-label="t('gallery.kind.label')"
+            :unstyled="true"
+            :pt="kindMenuPt"
+            class="sm:hidden"
+          />
+          <div class="flex min-w-0 flex-1 flex-col">
+            <OptionSelect
+              :options="placeOptions(0)"
+              :placeholder="placePlaceholder(0)"
+              :empty-text="t('gallery.search.noPlaces')"
+              @select="pickPlace(0, $event)"
+            >
+              <SearchField
+                :label="fieldLabelA"
+                :show-label="fromTo"
+                :value="labelA"
+                :icon="TAB_ICONS[tab]"
+                :placeholder="placePlaceholder(0)"
+                @clear="clearPick(0)"
+              />
+              <template #empty="{ query }">
+                <a
+                  :href="docsFeedbackUrl(FEEDBACK_TOPIC_MISSING_STOP, query)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="mt-1 block cursor-pointer text-sm font-semibold text-primary-50 underline underline-offset-2"
+                >
+                  {{ t('proposal.missingStopLink') }}
+                </a>
+              </template>
+            </OptionSelect>
+          </div>
+        </div>
+        <template v-if="fromTo">
+          <div class="mx-3 my-1 h-px bg-primary-50/15 sm:hidden" />
+          <button
+            type="button"
+            class="hidden h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-primary-50/20 text-primary-50/80 transition hover:bg-primary-50/10 sm:flex"
+            :aria-label="t('gallery.search.swap')"
+            @click="swapPicks"
+          >
+            <AppIcon :path="mdiSwapHorizontal" :size="18" />
+          </button>
+          <div class="flex min-w-0 flex-1 flex-col">
+            <OptionSelect
+              :options="placeOptions(1)"
+              :placeholder="placePlaceholder(1)"
+              :empty-text="t('gallery.search.noPlaces')"
+              @select="pickPlace(1, $event)"
+            >
+              <SearchField
+                :label="t('gallery.search.to')"
+                show-label
+                :value="labelB"
+                :icon="TAB_ICONS[tab]"
+                :placeholder="placePlaceholder(1)"
+                @clear="clearPick(1)"
+              />
+              <template #empty="{ query }">
+                <a
+                  :href="docsFeedbackUrl(FEEDBACK_TOPIC_MISSING_STOP, query)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="mt-1 block cursor-pointer text-sm font-semibold text-primary-50 underline underline-offset-2"
+                >
+                  {{ t('proposal.missingStopLink') }}
+                </a>
+              </template>
+            </OptionSelect>
+          </div>
+        </template>
+        <span class="hidden h-7 w-px shrink-0 bg-primary-50/15 lg:block" aria-hidden="true" />
+        <div class="hidden shrink-0 lg:flex">
+          <GalleryRangesChip
+            bar
+            :ranges="ranges"
+            :open="rangesOpen"
+            @open="rangesOpen = !rangesOpen"
+            @clear="ranges = {}"
+          />
+        </div>
+        <span class="hidden h-7 w-px shrink-0 bg-primary-50/15 lg:block" aria-hidden="true" />
+        <!-- Greyed, not hidden, while existing trains alone are listed: nobody
+             owns an ONTD row, and a control that vanished with the source would
+             be one nobody could find again. -->
+        <div class="hidden shrink-0 lg:flex">
+          <Select
+            v-model="whose"
+            :options="whoseOptions"
+            option-value="value"
+            option-label="label"
+            :disabled="existingOnly"
+            :title="existingOnly ? t('gallery.filter.disabledHint') : undefined"
+            :aria-label="t('gallery.filter.label')"
+            :unstyled="true"
+            :pt="whoseBarPt"
+            :class="existingOnly ? 'opacity-40' : ''"
+          >
+            <template #value="{ value }">
+              <span class="flex items-center gap-1.5">
+                <AppIcon :path="mdiAccountOutline" :size="16" />
+                {{ whoseOptions.find((o) => o.value === value)?.label }}
+              </span>
+            </template>
+          </Select>
+        </div>
+      </div>
+      <!-- What the kind means, in one line — "from → to" is both places touched,
+           in either direction, which a reader would otherwise take for end
+           points. Reset joins it on a desktop once anything differs from the
+           default (on a phone it is in the Filters sheet). -->
+      <div class="flex w-full items-center justify-center gap-4 px-4 lg:justify-between lg:px-5">
+        <p class="text-center text-xs text-primary-50/55 lg:text-left">
+          {{ t(`gallery.kind.hint.${kind}`) }}
+        </p>
         <button
+          v-if="!filtersAtDefault"
           type="button"
-          class="rounded-full px-3 py-1 transition"
-          :class="[
-            mineOnly ? inactiveOwnerClass : activeOwnerClass,
-            existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
-          ]"
-          :aria-pressed="!mineOnly"
-          :disabled="existingOnly"
-          @click="mineOnly = false"
+          class="hidden cursor-pointer text-sm text-primary-50/75 underline underline-offset-2 transition hover:text-primary-50 lg:block"
+          @click="resetFilters"
         >
-          {{ t('gallery.filter.all') }}
-        </button>
-        <button
-          type="button"
-          class="flex items-center gap-1.5 rounded-full px-3 py-1 transition"
-          :class="[
-            mineOnly ? activeOwnerClass : inactiveOwnerClass,
-            existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
-          ]"
-          :aria-pressed="mineOnly"
-          :disabled="existingOnly"
-          @click="selectMine"
-        >
-          <AppIcon :path="mdiAccountOutline" :size="16" />
-          {{ t('gallery.filter.mine') }}
+          {{ t('gallery.filters.reset') }}
         </button>
       </div>
     </div>
 
-    <!-- The range filters, collapsed to one line by default like the scenario
-         panel below it: the line names the preset or the ranges in effect,
-         and opening it costs the map its height (measureRow) only while the
-         reader is actually editing. -->
-    <GalleryDistribution
-      v-model:ranges="ranges"
-      :distributions="distributions"
-      :status="distributionsStatus"
-      @retry="loadDistributions"
-    />
+    <div
+      v-if="rangesOpen"
+      class="hidden rounded-xl border border-primary-50/10 bg-primary-50/[0.03] p-5 lg:block"
+    >
+      <GalleryDistribution
+        v-model:ranges="ranges"
+        :distributions="distributions"
+        :status="distributionsStatus"
+        @retry="loadDistributions"
+      />
+    </div>
 
-    <!-- The scenario the figures are read on. Collapsed to one line by
-         default — see the component: an open panel costs the map its height
-         (measureRow), and the summary line already answers "which figures am
-         I looking at?". -->
-    <GalleryScenarioPanel
-      v-model="galleryScenarioId"
-      :scenarios="store.scenarios"
-      :without-figures="withoutFigures"
-      :disabled="existingOnly"
-    />
+    <!-- How many the search matched, then what the list is read on and in
+         what order — across both columns, above the cards AND the map, since
+         it describes both. The loading state lives up here, where the eye is:
+         a spinner and a word while any page is in flight, the count otherwise
+         (see shownTotal). Below lg the scenario moves into the Filters sheet
+         and a Filters button takes its place. -->
+    <div
+      class="flex min-h-10 flex-wrap items-center justify-between gap-2 lg:border-t lg:border-primary-50/10 lg:pt-3"
+    >
+      <span
+        v-if="loading"
+        class="flex items-center gap-1.5 text-sm text-primary-50/60"
+        role="status"
+      >
+        <AppSpinner :size="14" />
+        {{ t('gallery.loading') }}
+      </span>
+      <p v-else-if="shownTotal !== null && !failure" class="text-sm text-primary-50/60">
+        {{ t('gallery.matching', shownTotal) }}
+      </p>
+      <span v-else></span>
+      <div class="flex items-center gap-2">
+        <div class="hidden lg:block">
+          <GalleryScenarioPanel
+            v-model="galleryScenarioId"
+            :scenarios="store.scenarios"
+            :without-figures="withoutFigures"
+            :disabled="existingOnly"
+          />
+        </div>
+        <button
+          type="button"
+          class="flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-3 py-1.5 text-sm leading-none text-primary-50 transition hover:bg-primary-50/10 lg:hidden"
+          aria-haspopup="dialog"
+          @click="openFilters"
+        >
+          <AppIcon :path="mdiTuneVariant" :size="16" />
+          {{ t('gallery.filters.open') }}
+          <span v-if="!filtersAtDefault" class="h-1.5 w-1.5 rounded-full bg-primary-300" />
+        </button>
+        <!-- Field and direction as ONE control: the field in words, the
+             direction as an mdi sort glyph. -->
+        <Select
+          v-model="sortSelection"
+          :options="sortOptions"
+          option-value="value"
+          option-label="label"
+          :unstyled="true"
+          :pt="selectPillPt"
+        >
+          <!-- Direction glyph first, then the field: the icon is the part
+               that changes between adjacent options, so leading with it makes
+               the list scannable down its left edge. -->
+          <template #value>
+            <!-- The field's name is spoken but not shown on a phone, where
+                 the count, Filters and the sort share one line. -->
+            <span v-if="selectedSortOption" class="flex items-center gap-1.5">
+              <AppIcon :path="selectedSortOption.icon" :size="16" />
+              <span class="sr-only">{{ selectedSortOption.dirLabel }}</span>
+              <span class="max-sm:sr-only">{{ selectedSortOption.label }}</span>
+            </span>
+          </template>
+          <template #option="{ option }">
+            <span class="flex items-center gap-1.5">
+              <AppIcon :path="option.icon" :size="16" />
+              <span class="sr-only">{{ option.dirLabel }}</span>
+              {{ option.label }}
+            </span>
+          </template>
+        </Select>
+      </div>
+    </div>
+
+    <!-- Below lg: the filters that sit in the chip row on a desktop, plus the
+         scenario, in a sheet from the bottom of the screen. Its first screen
+         names each in one row — the ranges preset as a switch, whose routes,
+         the scenario — and the two that need room (the four histograms, the
+         scenario switches) open a screen of their own with a way back. Every
+         control applies at once, like everywhere else on the page; the
+         button at the foot only closes the sheet. -->
+    <Teleport to="body">
+      <!-- The backdrop fades while the sheet slides up from the bottom edge,
+           and back down on close: one transition on the overlay, whose
+           `sheet-closed` marker the panel reads (in-[.sheet-closed]) for its
+           own slide. Both instant for readers who ask for reduced motion. -->
+      <Transition
+        enter-from-class="sheet-closed opacity-0"
+        enter-active-class="transition-opacity duration-250 ease-out motion-reduce:transition-none"
+        leave-active-class="transition-opacity duration-250 ease-in motion-reduce:transition-none"
+        leave-to-class="sheet-closed opacity-0"
+      >
+        <div
+          v-if="filtersOpen"
+          class="fixed inset-0 z-50 flex items-end bg-black/50 lg:hidden"
+          @click.self="filtersOpen = false"
+          @keydown.esc="filtersOpen = false"
+        >
+          <div
+            class="flex max-h-[90vh] w-full flex-col rounded-t-2xl border-t border-primary-50/15 bg-sapphire-200 transition-transform duration-250 ease-out in-[.sheet-closed]:translate-y-full motion-reduce:transition-none"
+            role="dialog"
+            aria-modal="true"
+            :aria-label="t('gallery.filters.title')"
+          >
+            <div
+              class="flex items-center gap-1 py-2 pr-2 pl-5"
+              :class="sheetView !== 'main' ? 'pl-1' : ''"
+            >
+              <button
+                v-if="sheetView !== 'main'"
+                type="button"
+                class="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full text-primary-50/80 transition hover:bg-primary-50/10"
+                :aria-label="t('gallery.filters.back')"
+                @click="sheetView = 'main'"
+              >
+                <AppIcon :path="mdiChevronLeft" :size="22" />
+              </button>
+              <h2 class="flex-1 text-lg font-medium text-primary-50">
+                {{
+                  sheetView === 'ranges'
+                    ? t('gallery.distribution.title')
+                    : sheetView === 'scenario'
+                      ? t('gallery.scenario.label')
+                      : t('gallery.filters.title')
+                }}
+              </h2>
+              <button
+                type="button"
+                class="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full text-primary-50/80 transition hover:bg-primary-50/10"
+                :aria-label="t('gallery.filters.close')"
+                @click="filtersOpen = false"
+              >
+                <AppIcon :path="mdiClose" :size="20" />
+              </button>
+            </div>
+
+            <div class="thin-scroll overflow-x-hidden overflow-y-auto px-5 pt-2 pb-5">
+              <!-- Into a screen of its own, the content slides in from the
+                 right; back to the overview, from the left. -->
+              <Transition
+                mode="out-in"
+                :enter-from-class="`${sheetView === 'main' ? '-translate-x-8' : 'translate-x-8'} opacity-0`"
+                :leave-to-class="`${sheetView === 'main' ? 'translate-x-8' : '-translate-x-8'} opacity-0`"
+                enter-active-class="transition duration-150 ease-out motion-reduce:transition-none"
+                leave-active-class="transition duration-150 ease-in motion-reduce:transition-none"
+              >
+                <div v-if="sheetView === 'main'" key="main" class="flex flex-col gap-6">
+                  <section class="flex flex-col gap-2">
+                    <h3 :class="sheetHeadingClass">{{ t('gallery.filters.length') }}</h3>
+                    <div class="flex flex-col rounded-xl bg-primary-50/[0.06]">
+                      <label class="flex min-h-14 cursor-pointer items-center gap-3 px-4">
+                        <span class="flex min-w-0 flex-1 flex-col">
+                          <span class="text-[15px] text-primary-50">{{
+                            t('gallery.filter.typical')
+                          }}</span>
+                          <span class="text-xs text-primary-50/55 tabular-nums">{{
+                            typicalValues
+                          }}</span>
+                        </span>
+                        <button
+                          type="button"
+                          role="switch"
+                          :aria-checked="typicalOn"
+                          class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition"
+                          :class="typicalOn ? 'bg-primary-500' : 'bg-primary-50/20'"
+                          @click="toggleTypical"
+                        >
+                          <span
+                            class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
+                            :class="typicalOn ? 'left-[1.375rem]' : 'left-0.5'"
+                          />
+                        </button>
+                      </label>
+                      <button
+                        type="button"
+                        class="flex min-h-13 cursor-pointer items-center justify-between gap-3 border-t border-primary-50/[0.08] px-4 text-left text-[15px] text-primary-50"
+                        @click="sheetView = 'ranges'"
+                      >
+                        {{ t('gallery.filters.adjust') }}
+                        <AppIcon
+                          :path="mdiChevronRight"
+                          :size="18"
+                          class="shrink-0 text-primary-50/60"
+                        />
+                      </button>
+                    </div>
+                  </section>
+
+                  <section class="flex flex-col gap-2" :class="existingOnly ? 'opacity-40' : ''">
+                    <h3 :class="sheetHeadingClass">{{ t('gallery.filter.label') }}</h3>
+                    <div class="grid grid-cols-2 gap-1 rounded-full bg-primary-50/[0.06] p-1">
+                      <button
+                        v-for="option in whoseOptions"
+                        :key="option.value"
+                        type="button"
+                        class="min-h-10 rounded-full text-[15px] transition"
+                        :class="[
+                          whose === option.value
+                            ? 'bg-primary-50/15 font-semibold text-primary-50'
+                            : 'text-primary-50/65',
+                          existingOnly ? 'cursor-not-allowed' : 'cursor-pointer',
+                        ]"
+                        :aria-pressed="whose === option.value"
+                        :disabled="existingOnly"
+                        @click="whose = option.value"
+                      >
+                        {{ option.label }}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section class="flex flex-col gap-2">
+                    <h3 :class="sheetHeadingClass">{{ t('gallery.scenario.label') }}</h3>
+                    <GalleryScenarioPanel
+                      v-model="galleryScenarioId"
+                      row
+                      :scenarios="store.scenarios"
+                      :without-figures="withoutFigures"
+                      :disabled="existingOnly"
+                      @open="sheetView = 'scenario'"
+                    />
+                    <p class="text-[13px] leading-relaxed text-primary-50/60">
+                      {{ t('gallery.filters.figuresNote') }}
+                    </p>
+                  </section>
+                </div>
+
+                <GalleryDistribution
+                  v-else-if="sheetView === 'ranges'"
+                  key="ranges"
+                  v-model:ranges="ranges"
+                  :distributions="distributions"
+                  :status="distributionsStatus"
+                  @retry="loadDistributions"
+                />
+
+                <section v-else key="scenario" class="flex flex-col gap-4">
+                  <p class="text-xs leading-relaxed text-primary-50/60">
+                    {{ t('gallery.scenario.hint') }}
+                  </p>
+                  <ScenarioSwitches v-model="galleryScenarioId" :scenarios="store.scenarios" />
+                </section>
+              </Transition>
+            </div>
+
+            <div
+              class="flex items-center justify-between gap-3 border-t border-primary-50/10 px-5 pt-3 pb-6"
+            >
+              <button
+                v-if="!filtersAtDefault"
+                type="button"
+                class="cursor-pointer text-sm text-primary-50/75 underline underline-offset-2"
+                @click="resetFilters"
+              >
+                {{ t('gallery.filters.reset') }}
+              </button>
+              <span v-else></span>
+              <button
+                type="button"
+                :class="[ctaButtonClass, 'min-h-12']"
+                @click="filtersOpen = false"
+              >
+                {{
+                  shownTotal !== null
+                    ? t('gallery.filters.show', shownTotal)
+                    : t('gallery.filters.close')
+                }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- Results: controls + a scrolling card list (left) beside the map
          (right), the row exactly one screen tall (measureRow) from lg up. Both
@@ -1299,57 +1719,6 @@ onActivated(() => {
       :style="{ '--row-height': rowHeight }"
     >
       <div class="flex w-full flex-col gap-3 lg:h-full lg:w-96 lg:shrink-0">
-        <!-- How many the search matched (left) and the sort (right), at the
-             head of the column whose order it sets — which also puts the
-             map's top edge level with it. The loading state lives up here,
-             where the eye is, not at the foot of a list that may be scrolled
-             out of view: a spinner and a word while any page is in flight,
-             the count otherwise. The count appears once the first query has
-             come back and then stays put across later searches — see
-             shownTotal. -->
-        <div class="flex min-h-8 items-center justify-between gap-2">
-          <span
-            v-if="loading"
-            class="flex items-center gap-1.5 text-sm text-primary-50/60"
-            role="status"
-          >
-            <AppSpinner :size="14" />
-            {{ t('gallery.loading') }}
-          </span>
-          <p v-else-if="shownTotal !== null && !failure" class="text-sm text-primary-50/50">
-            {{ t('gallery.matching', shownTotal) }}
-          </p>
-          <span v-else></span>
-          <!-- Field and direction as ONE control: the field in words, the
-               direction as an mdi sort glyph. -->
-          <Select
-            v-model="sortSelection"
-            :options="sortOptions"
-            option-value="value"
-            option-label="label"
-            :unstyled="true"
-            :pt="selectPillPt"
-          >
-            <!-- Direction glyph first, then the field: the icon is the part
-                 that changes between adjacent options, so leading with it makes
-                 the list scannable down its left edge. -->
-            <template #value>
-              <span v-if="selectedSortOption" class="flex items-center gap-1.5">
-                <AppIcon :path="selectedSortOption.icon" :size="16" />
-                <span class="sr-only">{{ selectedSortOption.dirLabel }}</span>
-                {{ selectedSortOption.label }}
-              </span>
-            </template>
-            <template #option="{ option }">
-              <span class="flex items-center gap-1.5">
-                <AppIcon :path="option.icon" :size="16" />
-                <span class="sr-only">{{ option.dirLabel }}</span>
-                {{ option.label }}
-              </span>
-            </template>
-          </Select>
-        </div>
-
         <!-- Failures land here, in the column the user is reading, rather than
              as a one-line note above the fold. -->
         <div
@@ -1407,7 +1776,11 @@ onActivated(() => {
 
           <!-- Trailing CTA, at the end of the list it belongs to -->
           <div class="flex justify-center pb-2">
-            <button type="button" :class="ctaButtonClass" @click="createProposal">
+            <button
+              type="button"
+              :class="[ctaButtonClass, 'min-h-12 w-full sm:w-auto']"
+              @click="createProposal"
+            >
               <AppIcon :path="mdiPlus" :size="18" />
               {{ t('gallery.cta.create') }}
             </button>
