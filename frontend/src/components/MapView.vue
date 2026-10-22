@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import maplibregl from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 // Sets MapLibre's worker URL (maplibre-gl-js#7339). Hoisted into its own module
 // so every map component shares one call — see lib/maplibreWorker.ts.
