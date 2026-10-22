@@ -1,12 +1,18 @@
 /**
- * maplibreWorker.ts — point MapLibre at its self-contained CSP worker, once,
- * for the whole app.
+ * maplibreWorker.ts — point MapLibre at its worker file, once, for the whole
+ * app.
  *
- * Vite 8 production builds corrupt the worker MapLibre assembles from its own
- * bundled code (maplibre-gl-js#7339): GeoJSON sources then fail inside the
- * worker ("<name> is not defined") and route lines never render, while dev
- * builds are unaffected. Pointing MapLibre at the prebuilt CSP worker keeps the
- * worker independent of how the main bundle was chunked or minified.
+ * Vite 8 production builds corrupted the worker MapLibre v5 assembled from its
+ * own bundled code (maplibre-gl-js#7339): GeoJSON sources then failed inside
+ * the worker ("<name> is not defined") and route lines never rendered, while
+ * dev builds were unaffected. v5 was pointed at its prebuilt CSP worker.
+ *
+ * MapLibre v6 is ESM-only and ships the worker as its own module
+ * (dist/maplibre-gl-worker.mjs, which imports a sibling shared chunk). The
+ * `?worker&url` query is the upstream-documented Vite setup: it routes the file
+ * through Vite's worker pipeline and emits a self-contained chunk. A plain
+ * `?url` would copy the file without its sibling and the worker would fail on
+ * its first import.
  *
  * Why this lives in its own module rather than in a map component:
  * `setWorkerUrl` is global state on the maplibregl module, and it only takes
@@ -22,8 +28,8 @@
  * gets it. ES modules execute once, so importing it repeatedly is free.
  */
 
-import maplibregl from 'maplibre-gl'
-import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url'
+import * as maplibregl from 'maplibre-gl'
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl)
 
