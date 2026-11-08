@@ -35,7 +35,7 @@ const PITCH_PARAGRAPHS = ['network', 'contribute', 'study'] as const
 // read as one set, one weight down so "suggest a route" stays the obvious
 // thing to do.
 const quietButtonClass =
-  'flex cursor-pointer items-center gap-1.5 rounded-full border border-primary-50/20 px-5 py-2 text-sm text-primary-50/70 transition hover:border-primary-50/40 hover:text-primary-50'
+  'flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-primary-50/20 px-5 py-2 text-sm text-primary-50/80 transition hover:border-primary-50/40 hover:text-primary-50'
 
 // --- Opening band sizing ----------------------------------------------------
 // The band fills the viewport below whatever sits above it (App.vue's header,
@@ -90,31 +90,34 @@ onActivated(measureHero)
         <h1 class="text-3xl font-light text-white sm:text-4xl">{{ t('gallery.heading') }}</h1>
 
         <!-- Every way into the site: contribute a route, read the others,
-             suggest a train, or read up. The call to action gets its own line
-             so the layout does not depend on how the labels wrap. The last
-             two leave the SPA for the static site at /docs/, hence anchors
-             rather than router links. -->
-        <div class="flex flex-col items-start gap-3">
-          <button type="button" :class="ctaButtonClass" @click="emit('create')">
+             suggest a train, or read up. One even-width stack — the call to
+             action and "browse" a full row each, the two short ones sharing
+             the last — so the layout does not depend on how the labels wrap.
+             The last two leave the SPA for the static site at /docs/, hence
+             anchors rather than router links. -->
+        <div class="grid w-full max-w-sm grid-cols-2 gap-3">
+          <button
+            type="button"
+            :class="[ctaButtonClass, 'col-span-2 min-h-12 text-base']"
+            @click="emit('create')"
+          >
             <AppIcon :path="mdiPlus" :size="18" />
             {{ t('gallery.cta.create') }}
           </button>
-          <div class="flex flex-wrap items-center gap-3">
-            <button type="button" :class="quietButtonClass" @click="emit('browse')">
-              {{ t('gallery.welcome.browse') }}
-            </button>
-            <a
-              :href="SUGGEST_COMPOSITION_URL"
-              target="_blank"
-              rel="noopener"
-              :class="quietButtonClass"
-            >
-              {{ t('gallery.welcome.suggestComposition') }}
-            </a>
-            <a :href="DOCS_ABOUT_URL" target="_blank" rel="noopener" :class="quietButtonClass">
-              {{ t('gallery.welcome.about') }}
-            </a>
-          </div>
+          <button type="button" :class="[quietButtonClass, 'col-span-2']" @click="emit('browse')">
+            {{ t('gallery.welcome.browse') }}
+          </button>
+          <a
+            :href="SUGGEST_COMPOSITION_URL"
+            target="_blank"
+            rel="noopener"
+            :class="quietButtonClass"
+          >
+            {{ t('gallery.welcome.suggestComposition') }}
+          </a>
+          <a :href="DOCS_ABOUT_URL" target="_blank" rel="noopener" :class="quietButtonClass">
+            {{ t('gallery.welcome.about') }}
+          </a>
         </div>
       </div>
 
@@ -124,7 +127,7 @@ onActivated(measureHero)
            carries the launch gate's press facts (backend/api/gate_page.py) in
            a lighter voice — keep the facts in step with the gate when either
            changes. -->
-      <div class="flex flex-col gap-4 text-sm leading-relaxed text-primary-50/70">
+      <div class="flex flex-col gap-4 text-[15px] leading-relaxed text-primary-50/80">
         <i18n-t
           v-for="paragraph in PITCH_PARAGRAPHS"
           :key="paragraph"

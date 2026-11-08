@@ -15,6 +15,10 @@ export interface SelectOption {
   subtitle?: string
   /** Lower-cased search text; the label alone when omitted. */
   haystack?: string
+  /** Heading of the run of options this one starts or continues — the
+   *  gallery's place field lists countries, cities and stations as three
+   *  groups. Options of one group must be adjacent. */
+  group?: string
 }
 
 const props = defineProps<{ options: SelectOption[]; placeholder: string; emptyText: string }>()
@@ -121,22 +125,30 @@ watch(filtered, () => {
       />
     </div>
     <div ref="listRef" class="search-popover-list thin-scroll overflow-y-auto p-1.5">
-      <p v-if="!filtered.length" class="px-4 py-3 text-base text-primary-50/70">
-        {{ emptyText }}
-      </p>
-      <button
-        v-for="(o, i) in filtered"
-        :key="o.key"
-        class="block w-full cursor-pointer rounded-lg px-4 py-3 text-left text-base text-primary-50 transition-colors"
-        :class="i === activeIndex ? 'bg-[#2b2e4a]' : ''"
-        @mouseenter="activeIndex = i"
-        @click="pick(o)"
-      >
-        <span class="block truncate">{{ o.label }}</span>
-        <span v-if="o.subtitle" class="block truncate text-xs text-primary-50/60">{{
-          o.subtitle
-        }}</span>
-      </button>
+      <div v-if="!filtered.length" class="px-4 py-3">
+        <p class="text-base text-primary-50/70">{{ emptyText }}</p>
+        <!-- What to do about it, when the caller has something to offer. -->
+        <slot name="empty" :query="filterQuery" />
+      </div>
+      <template v-for="(o, i) in filtered" :key="o.key">
+        <p
+          v-if="o.group && o.group !== filtered[i - 1]?.group"
+          class="px-4 pt-3 pb-1 text-xs font-semibold tracking-wider text-primary-50/55 uppercase"
+        >
+          {{ o.group }}
+        </p>
+        <button
+          class="block w-full cursor-pointer rounded-lg px-4 py-3 text-left text-base text-primary-50 transition-colors"
+          :class="i === activeIndex ? 'bg-[#2b2e4a]' : ''"
+          @mouseenter="activeIndex = i"
+          @click="pick(o)"
+        >
+          <span class="block truncate">{{ o.label }}</span>
+          <span v-if="o.subtitle" class="block truncate text-xs text-primary-50/60">{{
+            o.subtitle
+          }}</span>
+        </button>
+      </template>
     </div>
   </Popover>
 </template>

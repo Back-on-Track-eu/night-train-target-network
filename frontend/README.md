@@ -309,14 +309,22 @@ calc failure carries a _Try again_ action on its toast.
 `Gallery.vue` is one screen with three parts: the search bar, the result
 column and the map beside it.
 
+**What to browse** — proposals (the default), existing trains, or both — is
+always in view, never behind a menu: at the right end of the heading's line
+from `lg` up, on a row of its own under the heading below.
+
 **The search bar** is three places × two kinds (`lib/gallerySearch.ts`,
 decided 2026-10-04, replacing the four tabs A→B / By Station / By Country /
-Between Countries, which were the same two kinds unevenly spread). The tabs
-pick the kind of place — station, city, country — and a switch inside the
-pill picks _via_ (one field: routes that call there) or _from → to_ (two
-fields: routes that call at both, in either direction — the backend has no
-ordering predicate and a hint line under the pill says so). Each tab keeps
-its own picks, so switching tabs and back loses nothing. The mapping to the
+Between Countries, which were the same two kinds unevenly spread). One field
+lists every kind of place — countries, cities, stations, each under its
+heading — and picking one sets the kind (the model's `tab`, still what the
+filter and the URL are keyed by); a switch inside the pill picks _via_ (one
+field: routes that call there) or _from → to_ (two fields: routes that call
+at both, in either direction — the backend has no ordering predicate and a
+hint line under the pill says so). A pair is two places of the SAME kind,
+which is all the backend's filters offer: while the other field of a pair
+holds a pick, a field lists only that kind, and a pick of another kind starts
+the search over. There is no search button — every pick reloads the list. The mapping to the
 request is one table in `gallerySearch.ts`: station → `stop_ids` (a pair as
 `mode: 'all'`), city → `cities` (the backend's 0.5.15 filter, OSM place ids,
 a pair as `mode: 'all'`), country → `countries` or, for a pair, the stored
@@ -324,9 +332,9 @@ a pair as `mode: 'all'`), country → `countries` or, for a pair, the stored
 store (`cityOptions`: `StopCity.osm_id`, display name in the UI locale,
 search text in every catalogue language, centroid of the city's stops for
 the map pin); a stop without a resolved city stays reachable as a station.
-The two pickers are `StopSelect.vue` and the generic `OptionSelect.vue`
-(options with a label, an optional subtitle and their own search text —
-countries and cities alike). In the URL: `?tab=city&kind=fromTo&a=…&b=…`,
+The picker is the generic `OptionSelect.vue` (options with a label, an
+optional subtitle, their own search text and an optional group heading), the
+stations given the same multilingual search text `StopSelect.vue` builds. In the URL: `?tab=city&kind=fromTo&a=…&b=…`,
 with `a`/`b` the active tab's ids; the pre-2026-10-04 shape
 (`?mode&from&to&station&country&relFrom&relTo`) is still read
 (`proposalPrefill.ts`, `legacyQuery`). "Suggest a new route" prefills from
@@ -343,28 +351,39 @@ and the two columns are the same height, so the card list ends at the map's
 bottom edge instead of running past its corner. The cards scroll inside their
 own column, not down the page, which is also why the infinite-scroll sentinel is
 observed against that box (`root: cardScroller`) rather than the viewport.
-Anything added above the results row comes straight off the row's height — the
-result count and the sort stay in the result column for that reason. The
-source and ownership switches moved out of it on 2026-10-04 into a "Show" strip
-under the search pill, with the other controls that narrow the list: one row
-above the panels (≈44 px) against two rows gone from the card column — the
-cards gain what the map loses.
+Anything added above the results row comes straight off the row's height, so
+the header is two rows: the heading with the source switch, then one search
+bar spanning the page that ends on the other filters as suffixes after a rule
+each — the ranges and whose routes ("Everyone's" / "Mine") — with the hint and,
+once anything differs from the default, "Reset" on the line under it. The
+result count, "Figures for" (the scenario) and the sort share one line across
+both columns, since they describe both.
 `ROW_MIN_HEIGHT_PX` is the floor for short windows: it keeps room for roughly
 three cards, and below it the page scrolls again.
 
 **One column below `lg`.** On a phone or a portrait tablet there is no
-"beside": the map comes first at a fixed height (`h-64`, `sm:h-96`), then the
-source/sort controls and the ownership switch, then the cards running down the
-page. The measured row height rides a CSS custom property (`--row-height`) so
+"beside": the result line comes first — the count, a Filters button, the sort
+as its icon alone — then the map at a fixed height (`h-64`, `sm:h-96`), then
+the cards running down the page. The bar's filter suffixes give way to that Filters
+button, which opens a sheet from the bottom of the screen (a Teleport overlay
+like `AuthModal`'s). Its first screen names each filter in one row — the
+"Typical night trains" preset as a switch, whose routes, the scenario
+(`GalleryScenarioPanel`'s `row` variant) — and the two that need room, the
+four histograms and the scenario switches, open a screen of their own with a
+way back. The sheet slides up over a fading backdrop and its screens slide sideways
+(`<Transition>`, instant under `prefers-reduced-motion`). Every control applies at once; the sheet's button only closes it. The measured row height rides a CSS custom property (`--row-height`) so
 only the `lg:` class applies it, and the sentinel is observed against the
 viewport instead — `useMediaQuery(LG_MEDIA_QUERY)` is the one place the script
 needs to know which layout it is in, and it is pinned to the same breakpoint as
 the template's `lg:` classes so the observer's root and the column's overflow
 never disagree. The observer is rebuilt when the viewport crosses the
-breakpoint and on every re-activation of the cached page. The mode tabs become
-a 2×2 grid without dividers below `sm` (labels never wrap), and the search pill
-stacks its fields full-width with a labelled, full-width Search button. The
-stop and country overlays (`StopSelect.vue`, `CountrySelect.vue`) share the
+breakpoint and on every re-activation of the cached page. The search bar is one
+pill: from `sm` up the Via | From → to switch sits inside it, then the place
+(a search glyph, or "From" / "To" with a swap button between a pair), a picked
+place shown as a removable token with its kind's icon (`SearchField.vue`);
+below `sm` the switch is a "Via ▾" menu at the start of the field and a pair's
+"To" takes a second row. The place overlay (`OptionSelect.vue`, like
+`StopSelect.vue` in the builder) uses the
 `.search-popover` rules in `style.css`: a width inside the viewport — a
 popover sizes shrink-to-fit, which on a phone meant "as wide as the longest
 station name" and a page that scrolled sideways — rows that truncate, and a
@@ -435,14 +454,16 @@ result set). Leaving the gallery while a request is in flight cancels it
 and remembers it, so coming back resumes the load instead of showing an
 empty column.
 
-**The range filters panel** (`GalleryDistribution.vue`, pure logic in
-`lib/galleryRanges.ts`). A collapsible above the scenario panel, in the same
-idiom: one line until opened — the preset's name ("Typical night trains")
-or "Custom ranges", then the ranges in effect as chips — so the map keeps
-its height while nobody is editing. Open, it shows one histogram at a time
-— distance, duration, average speed or stops, picked from the dropdown —
-of the backend's `distributions` section, proposals in blue with existing trains
-stacked on top in orange, bars outside the range dimmed. The range is set
+**The range filters panel** (`GalleryDistribution.vue`, one
+`GalleryHistogram.vue` per measure, pure logic in `lib/galleryRanges.ts`).
+Closed, it is one chip (`GalleryRangesChip.vue`) naming what is in effect —
+"Typical night trains", "Any length", or the ranges themselves (the first two
+in words, a count for the rest) with an × that clears them — so the map keeps
+its height while nobody is editing. Open (under the search bar from `lg` up, in
+the Filters sheet below), it shows all four histograms at once — distance,
+duration, average speed and stops — of the backend's `distributions` section,
+proposals in blue with existing trains stacked on top in orange, bars outside
+the range dimmed. The range is set
 three ways: dragging the two handles (snapping to bin edges; arrow keys
 work too), typing a bound (empty = none), or the "Typical night trains"
 pill, which is a **preset** of the four ranges — the position paper's
@@ -450,22 +471,22 @@ yardstick, one way 500–2 000 km, 7–21 h, at least 50 km/h
 (`lib/typicalNightTrain.ts`, one place for the numbers; the ⓘ overlay text
 is rendered from them). The panel starts on it, a dragged handle or a typed
 bound leaves it, and the pill brings it back (or, when on, clears every
-range). All four ranges persist while the histogram switches and show as
-chips with an ×, so the reader always sees what is in effect. Each
+range). Each
 histogram is counted on the filter minus its own range, so a bar is what
 this one range keeps or drops of the set the other filters leave. Every
 range goes out with `scope: 'proposal'`: **existing trains always stay
 listed**, they are the comparison, whether or not they meet the envelope.
 A drag commits once, on release — one reload per gesture, not per pixel.
-The chart's viewBox is 1 400 units wide from `lg` up, 900 from `sm`, 460
-below: the same drawing, proportioned so it stays readable on a phone and
-does not tower over the map on a desktop. In the URL: nothing for the preset; otherwise each bounded measure as
+The chart's viewBox is 640 units wide from `lg` up (two charts a row) and
+460 below: the same drawing, proportioned so it stays readable on a phone
+and does not tower over the map on a desktop. In the URL: nothing for the preset; otherwise each bounded measure as
 `km=500-2000`, `h=7-21`, `kmh=50-`, `stops=-8` (an empty side is open),
 and `typical=0` for no ranges at all (also read from older links).
 
 **The scenario the figures are read on.** Every suggestion is stored once per
 scenario variant on the backend (§5.4a), so `GalleryScenarioPanel.vue` — the
-builder's own `ScenarioSwitches` behind a one-line collapsible header — picks
+builder's own `ScenarioSwitches` in a popover behind a "Figures for Infra
+2026 · Base" pill beside the sort (in the Filters sheet on a phone) — picks
 which projection the list reads: figures, sort order, per-card geometry and
 the corridor map all follow it. Existing (ONTD) trains are
 scenario-independent and unaffected. Two details that are load-bearing:
@@ -479,14 +500,12 @@ scenario-independent and unaffected. Two details that are load-bearing:
 - A proposal the chosen scenario has no figures for — not evaluable on that
   network (`status: "error"`) or not yet backfilled (`"missing"`) — stays in
   the list with its identity and stops, and `ProposalCard` shows one line
-  saying why in place of the figure grid. The panel header counts them.
+  saying why in place of the figure grid. The pill counts them.
 
-When the source switch shows existing trains alone, the panel and the
-ownership switch grey out and close rather than hide: nothing in either
+When the source switch shows existing trains alone, the scenario and the
+ownership control grey out and close rather than hide: nothing in either
 applies to an ONTD row, and a control that vanished with the source would be
-a control nobody could find again. The panel header carries a permanent
-"proposals only" chip for the same reason — which rows a scenario reaches is
-the one thing a reader can get wrong here.
+a control nobody could find again.
 
 The panel is collapsed by default because the results row is sized to the
 viewport minus everything above it — an always-open panel would cost the map
@@ -522,11 +541,17 @@ in its keep-alive cache), because the guest merge changes who published what
 and the "proposed by" lines would otherwise keep naming the guest.
 
 **What a card shows** (`ProposalCard.vue`). Three blocks, each behind a
-hairline, ranked so the eye has somewhere to land: the route in bold at the top
-with the country flags heading it (they say what the route crosses, so they
-belong to the itinerary rather than to the proposer), the figures in a fixed
-two-column grid, and the metadata foot — proposer, authoring dates, comments,
-likes. Only the route is bold; below it, hierarchy is carried by colour and
+hairline, ranked so the eye has somewhere to land: the route as a timetable at
+the top, the figures in a fixed two-column grid, and the metadata foot —
+proposer, authoring dates, comments, likes. The timetable reads like a rail
+search result, top to bottom: departure time and origin, the run between them
+(one-way travel time, stops passed), arrival time and destination with "+1" on
+a next-day arrival (`lib/cardClock.ts`), and any searched stop pinned between
+so the card shows why it matched. The times are the row's `departure_time` /
+`arrival_time` (one run, in `stop_ids` order); a row without them keeps the
+column as a plain dot. Names are as prominent as the times — on a "via"
+search the endpoints are the news — and each end carries its own country
+flag, from the stops store (a stop outside it has none). Only the route is bold; below it, hierarchy is carried by colour and
 size, because a card that sets the itinerary, every figure and both counts in
 semibold ranks nothing.
 
@@ -535,8 +560,10 @@ passenger trips per year, CO₂ saved | subsidy per tonne of CO₂ — so the sa
 fact sits in the same corner on every card and a list can be read down a
 column: the route's physics, then what runs and who rides, then climate and
 its price.
-Every value stays on one line (`whitespace-nowrap`, and the labels are kept
+Every value stays on one line (`whitespace-nowrap`, and the values are kept
 short for it): a figure that wraps breaks the alignment the grid exists for.
+Each carries a short label under it (`gallery.card.label.*`); the longer
+explanation stays a hover popover, which a phone never shows.
 Everything past average speed is proposal-only and appears once the proposal has
 an evaluation snapshot; composition is proposal-only on purpose, since an
 existing train carries whatever the catalogue names but nothing in the app can
@@ -558,9 +585,10 @@ after the results do, so a plain browser anchor would resolve against nothing.
 appear — source switch, map legend and card badge all say "Proposals" and
 "Existing" (German: "Vorschläge" / "Bestehend"). Keep them in step: they are
 three separate keys under `gallery.source.*`, `gallery.map.legend.*` and
-`gallery.card.existing`. The search bar's nouns likewise: `gallery.tabs.*`
-(the three places), `gallery.kind.*` (via / from → to and their hint lines)
-and `gallery.search.*` (field labels and placeholders per place).
+`gallery.card.existing`. The search bar's nouns likewise:
+`gallery.search.groups.*` (the three kinds of place), `gallery.kind.*` (via /
+from → to and their hint lines) and `gallery.search.*` (field labels and
+placeholders).
 
 ## Available Scripts
 

@@ -39,14 +39,13 @@ const { t } = useI18n()
     </div>
 
     <!-- Brand bar — background image with the logo, mirrors BoT's ~200px band
-         (logo 350px wide, flush to the container's left edge). -->
+         (logo 350px wide, flush to the container's left edge). Shorter on a
+         phone, where every pixel above the pitch pushes it down. -->
     <div
       class="bg-cover"
       :style="{ backgroundImage: `url(${headerBg})`, backgroundPosition: '50% 48%' }"
     >
-      <div
-        class="mx-auto flex h-[140px] w-full max-w-[1140px] items-center px-4 md:h-[201px] xl:px-0"
-      >
+      <div class="mx-auto flex h-24 w-full max-w-[1140px] items-center px-4 md:h-[201px] xl:px-0">
         <!-- New tab: this leaves the app entirely, and a proposal being built is
              only draft-persisted — navigating away in-place would drop the
              user's work mid-session. -->
@@ -59,7 +58,7 @@ const { t } = useI18n()
           <img
             :src="logo"
             :alt="t('header.logoAlt')"
-            class="w-[240px] object-contain md:w-[350px]"
+            class="w-[200px] object-contain md:w-[350px]"
           />
         </a>
       </div>

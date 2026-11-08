@@ -1205,6 +1205,11 @@ interface ProposalSummaryShared {
   composition_id: string | null
   total_distance_km: number
   total_time_h: number
+  // First stop's departure and last stop's arrival of one run, in stop_ids
+  // order: "HH:MM", hours past 24 for a next-day arrival ("30:43"). Null
+  // when the timetable has no time there.
+  departure_time: string | null
+  arrival_time: string | null
   avg_speed_kmh: number
   n_stops: number
   // countries alphabetical; stop_ids in travel order ([0] = origin, last =

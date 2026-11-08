@@ -915,6 +915,14 @@ and the supply figures are built on; the builder's own KPIs halve it in
 /api/proposal/<id>` and the family responses still carry the cycle in
 `evaluation.summary`. `avg_speed_kmh` is a ratio and is the same either way.
 
+Every gallery row (both sources) also carries `departure_time` and
+`arrival_time`: the first stop's departure and the last stop's arrival of
+one run, in the order `stop_ids` lists them, as `"HH:MM"` with hours past
+24 for a next-day arrival (`"06:43"` the same day, `"30:43"` the next) —
+`null` when the timetable has no time there. Proposals read the earliest
+outbound trip; existing rows the first active trip by `trip_id`, the same
+one their `stop_ids` come from. Display only: not filterable or sortable.
+
 Every range (numeric and datetime) also takes `"scope": "proposal"`: the
 bounds are then asked of proposal rows **only** and every existing (ONTD)
 row passes unexamined — `(source <> 'proposal' OR (col >= … AND col <= …))`.
@@ -1045,6 +1053,7 @@ apply to the `summaries` section — `map_lines`/`map_stop_counts`/
         "route_fingerprint": "sha256:...", "composition_id": "NEW-BAL-7",
         "scenario_id": 1, "route_builder_version": "0.9.13", "calc_version": "0.9.11",
         "total_distance_km": 683.4, "total_time_h": 9.0, "avg_speed_kmh": 76.0,
+        "departure_time": "21:14", "arrival_time": "30:14",
         "n_stops": 3, "countries": ["AT", "DE"],
         "country_relations": ["AT__DE"],
         "stop_ids": ["osm:n3856100103", "..."],
@@ -1066,6 +1075,7 @@ apply to the `summaries` section — `map_lines`/`map_stop_counts`/
         "name": "Nightjet Berlin – Wien",
         "composition_id": "NJ-STD",
         "total_distance_km": 705.0, "total_time_h": 10.5, "avg_speed_kmh": 67.0,
+        "departure_time": "19:42", "arrival_time": "30:12",
         "n_stops": 8, "countries": ["AT", "CZ", "DE"],
         "country_relations": ["AT__DE", "CZ__DE"],
         "stop_ids": ["osm:n3856100103", "..."],
